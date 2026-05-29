@@ -1,0 +1,25 @@
+{
+  "short_name": "Moment Jar",
+  "name": "Moment Jar — One moment at a time",
+  "description": "Add one small good thing that happened today. At the end of the year, open the jar and read them all back.",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#1a0a00",
+  "background_color": "#FFF8F0",
+  "categories": ["lifestyle", "productivity"]
+}

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#1a0a00" />
+    <meta name="description" content="Add one small good thing that happened today. At the end of the year, open the jar and read them all back." />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Moment Jar" />
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/icon-192.png" />
+    <title>Moment Jar</title>
+    <!-- Google Analytics: add your Moment Jar GA4 measurement ID here once registered.
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-XXXXXXXXXX');
+    </script>
+    -->
+    <script>
+      // Polyfill for crypto.randomUUID on older mobile browsers
+      if (!crypto.randomUUID) {
+        crypto.randomUUID = function() {
+          return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, function(c) {
+            return (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16);
+          });
+        };
+      }
+      // Polyfill for structuredClone
+      if (!window.structuredClone) {
+        window.structuredClone = function(obj) {
+          return JSON.parse(JSON.stringify(obj));
+        };
+      }
+    </script>
+    <style>
+      body { margin: 0; background: #FFF8F0; }
+      #root { min-height: 100vh; }
+    </style>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run Moment Jar.</noscript>
+    <div id="root"></div>
+  </body>
+</html>
