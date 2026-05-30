@@ -204,6 +204,11 @@ function todayStr() {
   const day = String(d.getDate()).padStart(2, "0");
   return `${d.getFullYear()}-${m}-${day}`;
 }
+// The browser's IANA time zone (e.g. "America/New_York") — saved with reminder
+// prefs so the daily-reminders function can fire at the user's real local time.
+function getTimeZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch { return null; }
+}
 function parseDate(s) {
   // Parse YYYY-MM-DD as a LOCAL date (avoid UTC shift)
   const [y, m, d] = (s || "").split("-").map(Number);
@@ -485,7 +490,8 @@ export default function App() {
     setReminderEnabled(enabled);
     setReminderTime(time);
     if (!currentUser?.id) return;
-    await savePreferences(currentUser.id, { reminder_enabled: enabled, reminder_time: time });
+    // Capture the browser's time zone so reminders fire at the user's local time.
+    await savePreferences(currentUser.id, { reminder_enabled: enabled, reminder_time: time, timezone: getTimeZone() });
     showToast(enabled ? "Reminder saved 🕯️" : "Reminders off");
   };
 

@@ -47,13 +47,25 @@ create table public.preferences (
   user_id           uuid primary key references auth.users(id) on delete cascade,
   email             text,
   reminder_enabled  boolean default false,
-  reminder_time     text default '20:00',
+  reminder_time     text default '20:00',   -- "HH:MM" in the user's local time
+  timezone          text,                   -- IANA tz, e.g. "America/New_York"
   is_pro            boolean default false,
   is_legacy         boolean default false,
   created_at        timestamptz default now(),
   updated_at        timestamptz default now()
 );
 ```
+
+**Already have a `preferences` table?** Add the timezone column:
+
+```sql
+alter table public.preferences add column if not exists timezone text;
+```
+
+The app captures the browser's time zone (`Intl.DateTimeFormat().resolvedOptions().timeZone`)
+automatically whenever reminder preferences are saved, and the `daily-reminders`
+edge function uses it to fire each reminder at the user's real local time (falling
+back to UTC if a row has no timezone yet).
 
 ### Row Level Security (each user only sees their own moments)
 
