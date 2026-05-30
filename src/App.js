@@ -210,7 +210,7 @@ function moodEmoji(m) { return m || "✨"; }
 // ════════════════════════════════════════════════════════════════════════════
 //  Jar illustration — fills as moments accumulate
 // ════════════════════════════════════════════════════════════════════════════
-function Jar({ count, fraction, celebrate }) {
+function Jar({ count, fraction, celebrate, bubbleFill }) {
   const interiorTop = 56, interiorBottom = 222, interiorLeft = 46, interiorRight = 154;
   const interiorH = interiorBottom - interiorTop;
   const fillH = fraction <= 0 ? 0 : Math.max(8, fraction * interiorH);
@@ -265,7 +265,10 @@ function Jar({ count, fraction, celebrate }) {
           )}
         </g>
         {dots.map((d, i) => (
-          <circle key={i} cx={d.x} cy={d.y} r={d.r} fill="#FFF1E2" opacity={d.o} />
+          // bubbleFill (if provided) is a self-contained rgba — let its own alpha
+          // govern so the dots render at exactly that translucency.
+          <circle key={i} cx={d.x} cy={d.y} r={d.r}
+            fill={bubbleFill || "#FFF1E2"} opacity={bubbleFill ? 1 : d.o} />
         ))}
       </g>
 
@@ -576,7 +579,7 @@ export default function App() {
       <div style={{ minHeight: "100vh", background: C.bg, display: "flex", flexDirection: "column",
         alignItems: "center", justifyContent: "center", fontFamily: "'Instrument Sans',sans-serif" }}>
         {styleTag}
-        <div style={{ width: 120, height: 140 }}><Jar count={8} fraction={0.4} /></div>
+        <div style={{ width: 120, height: 140 }}><Jar count={8} fraction={0.4} bubbleFill="rgba(255, 230, 200, 0.20)" /></div>
         <div style={{ fontFamily: "'Instrument Serif',serif", fontSize: 24, color: C.dark, marginTop: 12 }}>Moment Jar</div>
         <div style={{ display: "flex", gap: 6, marginTop: 16 }}>
           {[0, 1, 2].map(i => (
