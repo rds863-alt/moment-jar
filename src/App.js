@@ -65,17 +65,48 @@ const SPARKLES = [
 // ════════════════════════════════════════════════════════════════════════════
 function getToken() { try { return localStorage.getItem("sb_token") || ""; } catch { return ""; } }
 function setToken(t) { try { localStorage.setItem("sb_token", t); } catch {} }
-function clearToken() { try { localStorage.removeItem("sb_token"); localStorage.removeItem("sb_user"); } catch {} }
+function getRefreshToken() { try { return localStorage.getItem("sb_refresh") || ""; } catch { return ""; } }
+function setRefreshToken(t) { try { localStorage.setItem("sb_refresh", t); } catch {} }
+function clearToken() { try { localStorage.removeItem("sb_token"); localStorage.removeItem("sb_refresh"); localStorage.removeItem("sb_user"); } catch {} }
 function getStoredUser() { try { const u = localStorage.getItem("sb_user"); return u ? JSON.parse(u) : null; } catch { return null; } }
 function storeUser(user) { try { localStorage.setItem("sb_user", JSON.stringify(user)); } catch {} }
+
+// Exchange the refresh token for a fresh access token. Access tokens (JWTs)
+// expire after ~1h; without this, every authenticated read/write silently
+// 401s once the token expires while the cached user keeps the UI "signed in".
+async function refreshSession() {
+  try {
+    const refresh_token = getRefreshToken();
+    if (!refresh_token) return false;
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: { "apikey": SUPABASE_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token })
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    if (data.access_token) {
+      setToken(data.access_token);
+      if (data.refresh_token) setRefreshToken(data.refresh_token);
+      if (data.user) storeUser(data.user);
+      return true;
+    }
+    return false;
+  } catch { return false; }
+}
 
 async function getSession() {
   try {
     const token = getToken();
     if (!token) return getStoredUser();
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${token}` }
+    const fetchUser = () => fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { "apikey": SUPABASE_KEY, "Authorization": `Bearer ${getToken()}` }
     });
+    let res = await fetchUser();
+    // Token expired? Refresh once and retry before giving up.
+    if ((res.status === 401 || res.status === 403) && await refreshSession()) {
+      res = await fetchUser();
+    }
     if (!res.ok) return getStoredUser();
     const data = await res.json();
     if (data?.id) { storeUser(data); return data; }
@@ -105,6 +136,7 @@ async function verifyOtp(email, token) {
     const data = await res.json();
     if (data.access_token) {
       setToken(data.access_token);
+      if (data.refresh_token) setRefreshToken(data.refresh_token);
       if (data.user) storeUser(data.user);
     }
     return data;
@@ -122,17 +154,19 @@ async function signOut() {
 }
 
 async function sbFetch(path, options = {}) {
-  const token = getToken() || SUPABASE_KEY;
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${token}`,
-      "Prefer": "return=minimal",
-      ...(options.headers || {})
-    }
+  // Build headers fresh each attempt so a mid-call token refresh is picked up.
+  const buildHeaders = () => ({
+    "Content-Type": "application/json",
+    "apikey": SUPABASE_KEY,
+    "Authorization": `Bearer ${getToken() || SUPABASE_KEY}`,
+    "Prefer": "return=minimal",
+    ...(options.headers || {})
   });
+  let res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...options, headers: buildHeaders() });
+  // Access token expired mid-session? Refresh once and retry the request.
+  if ((res.status === 401 || res.status === 403) && getRefreshToken() && await refreshSession()) {
+    res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...options, headers: buildHeaders() });
+  }
   return res;
 }
 
@@ -169,12 +203,13 @@ async function deleteMomentRemote(userId, id) {
 
 async function savePreferences(userId, fields) {
   try {
-    await sbFetch("preferences", {
+    const res = await sbFetch("preferences", {
       method: "POST",
       headers: { "Prefer": "resolution=merge-duplicates" },
       body: JSON.stringify({ user_id: userId, ...fields, updated_at: new Date().toISOString() })
     });
-  } catch {}
+    return res.ok;
+  } catch { return false; }
 }
 
 async function loadPreferences(userId) {
@@ -489,10 +524,11 @@ export default function App() {
   const saveReminderPrefs = async (enabled, time) => {
     setReminderEnabled(enabled);
     setReminderTime(time);
-    if (!currentUser?.id) return;
+    if (!currentUser?.id) { showToast("Sign in to save reminders"); return; }
     // Capture the browser's time zone so reminders fire at the user's local time.
-    await savePreferences(currentUser.id, { reminder_enabled: enabled, reminder_time: time, timezone: getTimeZone() });
-    showToast(enabled ? "Reminder saved 🕯️" : "Reminders off");
+    const ok = await savePreferences(currentUser.id, { reminder_enabled: enabled, reminder_time: time, timezone: getTimeZone() });
+    if (ok) showToast(enabled ? "Reminder saved 🕯️" : "Reminders off");
+    else showToast("Couldn't save — please try again");
   };
 
   // ── Add a memory ──
