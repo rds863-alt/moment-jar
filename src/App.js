@@ -17,6 +17,7 @@ const C = {
   dark:    "#1a0a00", // primary/dark
   accent:  "#C84B11", // accent
   accentD: "#A33A0D", // accent pressed
+  gold:    "#FFD200", // warm sparkle highlight
   bg:      "#FFF8F0", // background
   card:    "#FFFFFF",
   cream:   "#FBEEE2", // warm panel
@@ -45,6 +46,19 @@ const TAGS = ["family", "nature", "work", "food", "friends", "simple joy"];
 const LS_MOMENTS = "mj_moments_v1";
 
 const FILL_GOAL = 100; // moments that visually "fill" the jar to the brim
+
+// Sparkle burst directions (radiate up/outward from the jar on a successful save)
+const SPARKLES = [
+  { tx: "-64px", ty: "-58px", size: "20px", delay: 0 },
+  { tx: "60px",  ty: "-50px", size: "16px", delay: 40 },
+  { tx: "-80px", ty: "4px",   size: "14px", delay: 70 },
+  { tx: "82px",  ty: "-2px",  size: "18px", delay: 20 },
+  { tx: "-42px", ty: "60px",  size: "15px", delay: 95 },
+  { tx: "50px",  ty: "64px",  size: "17px", delay: 60 },
+  { tx: "2px",   ty: "-86px", size: "16px", delay: 30 },
+  { tx: "26px",  ty: "-72px", size: "13px", delay: 110 },
+  { tx: "-28px", ty: "-76px", size: "14px", delay: 100 },
+];
 
 // ════════════════════════════════════════════════════════════════════════════
 //  Auth + Supabase helpers (raw fetch — mirrors LifeOnTrack)
@@ -196,7 +210,7 @@ function moodEmoji(m) { return m || "✨"; }
 // ════════════════════════════════════════════════════════════════════════════
 //  Jar illustration — fills as moments accumulate
 // ════════════════════════════════════════════════════════════════════════════
-function Jar({ count, fraction }) {
+function Jar({ count, fraction, celebrate }) {
   const interiorTop = 56, interiorBottom = 222, interiorLeft = 46, interiorRight = 154;
   const interiorH = interiorBottom - interiorTop;
   const fillH = fraction <= 0 ? 0 : Math.max(8, fraction * interiorH);
@@ -236,16 +250,20 @@ function Jar({ count, fraction }) {
 
       {/* Liquid fill (clipped to jar interior) */}
       <g clipPath="url(#jarInterior)">
-        <rect
-          x="40" width="120" y={fillTop} height={fillH + 6}
-          fill="url(#liquid)"
-          style={{ transition: "y .9s cubic-bezier(.22,1,.36,1), height .9s cubic-bezier(.22,1,.36,1)" }}
-        />
-        {/* surface highlight */}
-        {fraction > 0 && (
-          <ellipse cx="100" cy={fillTop} rx="58" ry="5" fill="#F4A86A" opacity="0.85"
-            style={{ transition: "cy .9s cubic-bezier(.22,1,.36,1)" }} />
-        )}
+        {/* rect + surface ride together so the ripple reads as one settling wave */}
+        <g className={celebrate ? "mj-rippling" : ""}
+          style={{ transformBox: "fill-box", transformOrigin: "center bottom" }}>
+          <rect
+            x="40" width="120" y={fillTop} height={fillH + 6}
+            fill="url(#liquid)"
+            style={{ transition: "y .9s cubic-bezier(.22,1,.36,1), height .9s cubic-bezier(.22,1,.36,1)" }}
+          />
+          {/* surface highlight */}
+          {fraction > 0 && (
+            <ellipse cx="100" cy={fillTop} rx="58" ry="5" fill="#F4A86A" opacity="0.85"
+              style={{ transition: "cy .9s cubic-bezier(.22,1,.36,1)" }} />
+          )}
+        </g>
         {dots.map((d, i) => (
           <circle key={i} cx={d.x} cy={d.y} r={d.r} fill="#FFF1E2" opacity={d.o} />
         ))}
@@ -326,9 +344,17 @@ export default function App() {
   const [randomPast, setRandomPast] = useState(null);
   const pickedRandomRef = useRef(false);
 
+  // Drop-in-the-jar celebration (sparkle burst + liquid ripple + count bounce)
+  const [celebrate, setCelebrate] = useState(false);
+  const [celebrateKey, setCelebrateKey] = useState(0);
+  const celebrateTimer = useRef(null);
+
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2400); };
 
   useEffect(() => { setTimeout(() => setAnimIn(true), 60); }, []);
+
+  // Clear any pending celebration timer on unmount
+  useEffect(() => () => { if (celebrateTimer.current) clearTimeout(celebrateTimer.current); }, []);
 
   // ── Persist locally whenever moments change ──
   useEffect(() => { saveMomentsLocal(moments); }, [moments]);
@@ -446,6 +472,12 @@ export default function App() {
     setDraftText(""); setDraftMood(null); setDraftTag(null);
     setAddOpen(false); setDropping(false);
     setTab("jar");
+    // Celebrate the successful save — sparkles + ripple + count bounce.
+    // Each trigger gets a fresh key so the CSS animations restart on rapid adds.
+    setCelebrateKey(k => k + 1);
+    setCelebrate(true);
+    if (celebrateTimer.current) clearTimeout(celebrateTimer.current);
+    celebrateTimer.current = setTimeout(() => setCelebrate(false), 850);
     showToast("Dropped in the jar ✨");
   };
 
@@ -513,7 +545,26 @@ export default function App() {
       @keyframes mjbounce{0%,80%,100%{transform:scale(0.6);opacity:.4}40%{transform:scale(1);opacity:1}}
       @keyframes mjfade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
       @keyframes mjnudge{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(200,75,17,.20)}50%{transform:scale(1.015);box-shadow:0 0 0 7px rgba(200,75,17,0)}}
-      @media (prefers-reduced-motion: reduce){.mj-nudge{animation:none!important}}
+      /* ── Drop-in-the-jar celebration ── */
+      .mj-spark{position:absolute;left:50%;top:54%;font-size:18px;line-height:1;pointer-events:none;
+        filter:drop-shadow(0 0 4px ${C.gold});will-change:transform,opacity;
+        animation:mjspark .8s cubic-bezier(.22,1,.36,1) forwards}
+      @keyframes mjspark{
+        0%{opacity:0;transform:translate(-50%,-50%) translate(0,0) scale(.3) rotate(0deg)}
+        18%{opacity:1}
+        100%{opacity:0;transform:translate(-50%,-50%) translate(var(--tx),var(--ty)) scale(1.15) rotate(45deg)}}
+      .mj-rippling{animation:mjripple .8s cubic-bezier(.22,1,.36,1)}
+      @keyframes mjripple{
+        0%{transform:translateY(0) scaleY(1)}
+        22%{transform:translateY(-3px) scaleY(1.05)}
+        50%{transform:translateY(1.5px) scaleY(.975)}
+        76%{transform:translateY(-.6px) scaleY(1.01)}
+        100%{transform:translateY(0) scaleY(1)}}
+      .mj-countpop{display:inline-block;animation:mjcount .6s cubic-bezier(.34,1.56,.64,1)}
+      @keyframes mjcount{0%{transform:scale(1)}35%{transform:scale(1.32);color:${C.accent}}100%{transform:scale(1)}}
+      @media (prefers-reduced-motion: reduce){
+        .mj-nudge,.mj-rippling,.mj-countpop,.mj-spark{animation:none!important}
+        .mj-spark{display:none!important}}
     `}</style>
   );
 
@@ -678,11 +729,22 @@ export default function App() {
 
             {/* The jar */}
             <div style={{ textAlign: "center", marginTop: onThisDay.length ? 0 : 14 }}>
-              <div style={{ width: 220, height: 264, margin: "0 auto" }}>
-                <Jar count={thisYearMoments.length} fraction={fraction} />
+              <div style={{ position: "relative", width: 220, height: 264, margin: "0 auto" }}>
+                <Jar count={thisYearMoments.length} fraction={fraction} celebrate={celebrate} />
+                {/* Sparkle burst radiating from the jar */}
+                {celebrate && (
+                  <div key={celebrateKey} aria-hidden="true"
+                    style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "visible" }}>
+                    {SPARKLES.map((s, i) => (
+                      <span key={i} className="mj-spark"
+                        style={{ "--tx": s.tx, "--ty": s.ty, animationDelay: `${s.delay}ms`, fontSize: s.size }}>✨</span>
+                    ))}
+                  </div>
+                )}
               </div>
               <div style={{ fontFamily: "'Instrument Serif',serif", fontSize: 30, color: C.dark, marginTop: 4 }}>
-                {thisYearMoments.length} {thisYearMoments.length === 1 ? "moment" : "moments"}
+                <span key={celebrateKey} className={celebrate ? "mj-countpop" : undefined}>{thisYearMoments.length}</span>
+                {" "}{thisYearMoments.length === 1 ? "moment" : "moments"}
               </div>
               <div style={{ color: C.muted, fontSize: 14 }}>this year</div>
             </div>
