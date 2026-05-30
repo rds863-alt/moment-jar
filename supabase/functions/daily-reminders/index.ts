@@ -164,7 +164,7 @@ serve(async (_req) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          from: "Moment Jar <hello@momentjar.app>",
+          from: "Moment Jar <reminders@lifeontrack.app>",
           reply_to: "rds86@duck.com",
           to: pref.email,
           subject: `${prompt} ✨`,
