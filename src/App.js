@@ -184,7 +184,7 @@ async function loadMomentsRemote(userId) {
 
 async function saveMomentRemote(userId, m) {
   try {
-    await sbFetch("moments", {
+    const res = await sbFetch("moments", {
       method: "POST",
       headers: { "Prefer": "resolution=merge-duplicates" },
       body: JSON.stringify({
@@ -192,13 +192,15 @@ async function saveMomentRemote(userId, m) {
         tag: m.tag, date: m.date, created_at: m.created_at
       })
     });
-  } catch {}
+    return res.ok;
+  } catch { return false; }
 }
 
 async function deleteMomentRemote(userId, id) {
   try {
-    await sbFetch(`moments?id=eq.${id}&user_id=eq.${userId}`, { method: "DELETE" });
-  } catch {}
+    const res = await sbFetch(`moments?id=eq.${id}&user_id=eq.${userId}`, { method: "DELETE" });
+    return res.ok;
+  } catch { return false; }
 }
 
 async function savePreferences(userId, fields) {
@@ -470,12 +472,22 @@ export default function App() {
       const byId = {};
       remote.forEach(m => { byId[m.id] = m; });
       const localOnly = local.filter(m => !byId[m.id]);
-      // push local-only up to the server
-      for (const m of localOnly) { await saveMomentRemote(userId, m); byId[m.id] = m; }
+      // Push local-only moments up to the server. Keep each one locally either
+      // way (so it's never lost and gets retried on the next sync), but count
+      // failures so we can surface them instead of hiding a sync problem.
+      let failed = 0;
+      for (const m of localOnly) {
+        const ok = await saveMomentRemote(userId, m);
+        if (!ok) failed++;
+        byId[m.id] = m;
+      }
       const merged = Object.values(byId).sort((a, b) =>
         (b.created_at || "").localeCompare(a.created_at || ""));
       setMoments(merged);
       saveMomentsLocal(merged);
+      if (failed > 0) {
+        showToast(`${failed} moment${failed !== 1 ? "s" : ""} haven't synced yet — we'll keep trying`);
+      }
     } catch {}
   };
 
@@ -547,7 +559,6 @@ export default function App() {
     const next = [m, ...moments].sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
     setMoments(next);
     saveMomentsLocal(next);
-    if (currentUser?.id) saveMomentRemote(currentUser.id, m);
     // reset draft + close
     setDraftText(""); setDraftMood(null); setDraftTag(null);
     setAddOpen(false); setDropping(false);
@@ -559,14 +570,25 @@ export default function App() {
     if (celebrateTimer.current) clearTimeout(celebrateTimer.current);
     celebrateTimer.current = setTimeout(() => setCelebrate(false), 850);
     showToast("Dropped in the jar ✨");
+    // The moment is already safe on this device; sync to the account in the
+    // background. If it fails, say so gently — it'll retry on the next sync.
+    if (currentUser?.id) {
+      const ok = await saveMomentRemote(currentUser.id, m);
+      if (!ok) showToast("Saved on this device — it'll sync to your account later");
+    }
   };
 
-  const deleteMoment = (m) => {
+  const deleteMoment = async (m) => {
     if (!window.confirm("Remove this moment from your jar?")) return;
     const next = moments.filter(x => x.id !== m.id);
     setMoments(next);
     saveMomentsLocal(next);
-    if (currentUser?.id) deleteMomentRemote(currentUser.id, m.id);
+    // A failed remote delete would otherwise reappear silently on next sync,
+    // so surface it rather than hiding the failure.
+    if (currentUser?.id) {
+      const ok = await deleteMomentRemote(currentUser.id, m.id);
+      if (!ok) showToast("Couldn't remove from your account — please try again");
+    }
   };
 
   // ── Derived data ──
