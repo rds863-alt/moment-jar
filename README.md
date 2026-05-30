@@ -33,11 +33,9 @@ configure OTP auth, and deploy to Vercel.
 public/
   index.html          warm amber theme (#1a0a00), PWA meta, polyfills
   manifest.json       PWA manifest
-  service-worker.js    network-first cache
 src/
   App.js              the whole app (auth + jar + add + browse + on-this-day)
-  index.js            entry + service worker registration
-  serviceWorkerRegistration.js
+  index.js            entry (also unregisters any old service worker)
 SETUP.md              Supabase + Vercel setup and the SQL schema
 vercel.json           rewrites only — never "routes"
 ```
