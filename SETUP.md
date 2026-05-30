@@ -134,7 +134,85 @@ git push
 
 ---
 
-## 6. Android app (later — not part of v1 web build)
+## 6. Email functions (daily reminder + weekly recap)
+
+Two Supabase Edge Functions send the warm emails. Both live in
+`supabase/functions/`, share the same env-var pattern, and send via Resend from
+`Moment Jar <reminders@lifeontrack.app>` (reply-to `rds86@duck.com`) using the
+already-verified `lifeontrack.app` domain.
+
+### One-time setup (per project)
+
+```bash
+cd C:\Users\rds86\moment-jar
+supabase login                                   # first time only
+supabase link --project-ref afhcuanapgsxrorvygfi # first time only
+
+# Resend key as a secret (SUPABASE_URL + SERVICE_ROLE_KEY are auto-injected).
+# Use a key from the Resend account where lifeontrack.app is verified.
+supabase secrets set RESEND_API_KEY=your_resend_api_key --project-ref afhcuanapgsxrorvygfi
+```
+
+Make sure `pg_cron` and `pg_net` are enabled (Database → Extensions).
+
+### Deploy
+
+```bash
+# Daily reminder ("What was one good thing today?")
+supabase functions deploy daily-reminders --project-ref afhcuanapgsxrorvygfi --no-verify-jwt
+
+# Weekly recap ("Your week in the jar")
+supabase functions deploy weekly-recap   --project-ref afhcuanapgsxrorvygfi --no-verify-jwt
+```
+
+Both are deployed with `--no-verify-jwt` because they're triggered by cron, not
+by a signed-in user.
+
+### Cron schedules (run these in the SQL Editor)
+
+```sql
+-- Daily reminder: fires every 30 min; each user is matched once per day at
+-- their own reminder_time (the function does the per-timezone window check).
+-- Keep this cadence == WINDOW_MINUTES (30) in daily-reminders/index.ts.
+select cron.schedule(
+  'moment-jar-daily-reminders',
+  '*/30 * * * *',
+  $$
+  select net.http_post(
+    url := 'https://afhcuanapgsxrorvygfi.supabase.co/functions/v1/daily-reminders',
+    headers := jsonb_build_object('Content-Type', 'application/json')
+  );
+  $$
+);
+
+-- Weekly recap: fires hourly; an internal guard only sends at Sunday 7pm
+-- America/Los_Angeles (DST-proof — the function resolves PST/PDT itself).
+select cron.schedule(
+  'moment-jar-weekly-recap',
+  '0 * * * *',
+  $$
+  select net.http_post(
+    url := 'https://afhcuanapgsxrorvygfi.supabase.co/functions/v1/weekly-recap',
+    headers := jsonb_build_object('Content-Type', 'application/json')
+  );
+  $$
+);
+```
+
+### Test a send immediately
+
+```bash
+# Weekly recap supports ?force=true to bypass the Sunday-7pm guard.
+# Needs a reminder_enabled account with at least one moment in the last 7 days.
+curl -X POST "https://afhcuanapgsxrorvygfi.supabase.co/functions/v1/weekly-recap?force=true"
+```
+
+To manage jobs later: `select * from cron.job;` and
+`select cron.unschedule('moment-jar-weekly-recap');`.
+
+---
+
+## 7. Android app (later — not part of v1 web build)
 
 Mirror `LifeOnTrackApp2/` (Expo SDK 54 React Native WebView, `newArchEnabled: false`).
 Don't use SDK 56 + expo-router — that combination was abandoned in LifeOnTrack as
