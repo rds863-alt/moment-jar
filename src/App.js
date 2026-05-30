@@ -167,14 +167,26 @@ async function deleteMomentRemote(userId, id) {
   } catch {}
 }
 
-async function savePreferences(userId, email) {
+async function savePreferences(userId, fields) {
   try {
     await sbFetch("preferences", {
       method: "POST",
       headers: { "Prefer": "resolution=merge-duplicates" },
-      body: JSON.stringify({ user_id: userId, email, updated_at: new Date().toISOString() })
+      body: JSON.stringify({ user_id: userId, ...fields, updated_at: new Date().toISOString() })
     });
   } catch {}
+}
+
+async function loadPreferences(userId) {
+  try {
+    const res = await sbFetch(
+      `preferences?user_id=eq.${userId}&select=reminder_enabled,reminder_time`,
+      { headers: { "Prefer": "" } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data && data.length > 0 ? data[0] : null;
+  } catch { return null; }
 }
 
 // ── Local persistence ─────────────────────────────────────────────────────────
@@ -341,6 +353,10 @@ export default function App() {
   const [filterMood, setFilterMood] = useState(null);
   const [filterTag, setFilterTag] = useState(null);
 
+  // Daily reminder preferences (synced to the preferences table)
+  const [reminderEnabled, setReminderEnabled] = useState(false);
+  const [reminderTime, setReminderTime] = useState("20:00");
+
   // Random "from your jar" pick — chosen once per app open, then held steady
   const [randomPast, setRandomPast] = useState(null);
   const pickedRandomRef = useRef(false);
@@ -389,7 +405,12 @@ export default function App() {
         setCurrentUser(user);
         setAuthScreen("app");
         setAuthChecked(true);
-        savePreferences(user.id, user.email);
+        await savePreferences(user.id, { email: user.email });
+        const prefs = await loadPreferences(user.id);
+        if (prefs) {
+          setReminderEnabled(prefs.reminder_enabled === true);
+          setReminderTime(prefs.reminder_time || "20:00");
+        }
         await syncMoments(user.id);
       } else {
         if (local.length === 0) setAuthScreen("landing");
@@ -436,7 +457,12 @@ export default function App() {
       setCurrentUser(data.user);
       setAuthScreen("app");
       setAuthChecked(true);
-      savePreferences(data.user.id, data.user.email);
+      await savePreferences(data.user.id, { email: data.user.email });
+      const prefs = await loadPreferences(data.user.id);
+      if (prefs) {
+        setReminderEnabled(prefs.reminder_enabled === true);
+        setReminderTime(prefs.reminder_time || "20:00");
+      }
       await syncMoments(data.user.id);
     } else {
       setAuthError("Invalid code. Please try again.");
@@ -450,6 +476,17 @@ export default function App() {
     setSettingsOpen(false);
     setAuthEmail(""); setAuthOtp("");
     setAuthScreen("landing");
+  };
+
+  // ── Daily reminder preferences ──
+  // Optimistically update the UI, then persist to the preferences table
+  // the same way every other preference is saved (sbFetch upsert).
+  const saveReminderPrefs = async (enabled, time) => {
+    setReminderEnabled(enabled);
+    setReminderTime(time);
+    if (!currentUser?.id) return;
+    await savePreferences(currentUser.id, { reminder_enabled: enabled, reminder_time: time });
+    showToast(enabled ? "Reminder saved 🕯️" : "Reminders off");
   };
 
   // ── Add a memory ──
@@ -924,6 +961,44 @@ export default function App() {
                 {moments.length} {moments.length === 1 ? "moment" : "moments"} saved
               </div>
             </div>
+
+            {/* Daily reminder — synced to the preferences table */}
+            {currentUser && (
+              <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: C.text, fontSize: 15, fontWeight: 600 }}>Daily reminder</div>
+                    <div style={{ color: C.muted, fontSize: 12.5, marginTop: 2, lineHeight: 1.45 }}>
+                      A soft nudge to add one good thing
+                    </div>
+                  </div>
+                  <button role="switch" aria-checked={reminderEnabled} aria-label="Toggle daily reminder"
+                    onClick={() => saveReminderPrefs(!reminderEnabled, reminderTime)}
+                    style={{ width: 48, height: 28, borderRadius: 999, border: "none", cursor: "pointer", flexShrink: 0,
+                      background: reminderEnabled ? C.accent : C.border, position: "relative", transition: "background .2s" }}>
+                    <span style={{ position: "absolute", top: 3, left: reminderEnabled ? 23 : 3, width: 22, height: 22,
+                      borderRadius: "50%", background: "#fff", transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,.25)" }} />
+                  </button>
+                </div>
+
+                {reminderEnabled && (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                    marginTop: 16, paddingTop: 14, borderTop: `1px solid ${C.border}` }}>
+                    <label htmlFor="mj-reminder-time" style={{ color: C.text, fontSize: 14 }}>Remind me at</label>
+                    <input id="mj-reminder-time" type="time" value={reminderTime}
+                      onChange={e => saveReminderPrefs(reminderEnabled, e.target.value)}
+                      style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10,
+                        padding: "8px 12px", color: C.text, fontFamily: "inherit", fontSize: 15, outline: "none" }} />
+                  </div>
+                )}
+
+                <div style={{ color: C.muted, fontSize: 12, marginTop: 14, lineHeight: 1.5 }}>
+                  Just one soft email a day — never more. Miss a day and nothing happens; your jar's in no
+                  rush. Turn it off whenever you like.
+                </div>
+              </div>
+            )}
+
             {currentUser ? (
               <button onClick={handleSignOut} style={{ width: "100%", background: "#fff",
                 border: `1px solid ${C.border}`, color: C.accentD, borderRadius: 12, padding: 14,
