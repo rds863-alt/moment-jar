@@ -23,3 +23,6 @@ yarn-debug.log*
 yarn-error.log*
 
 .vercel
+
+# Supabase CLI local state
+supabase/.temp/
