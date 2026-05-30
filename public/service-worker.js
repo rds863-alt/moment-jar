@@ -1,4 +1,4 @@
-const CACHE_NAME = 'moment-jar-v1';
+const CACHE_NAME = 'moment-jar-v2';
 const urlsToCache = [
   '/',
   '/index.html',
