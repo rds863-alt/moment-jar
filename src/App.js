@@ -1508,14 +1508,19 @@ export default function App() {
                 </div>
 
                 {reminderEnabled && (
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-                    marginTop: 16, paddingTop: 14, borderTop: `1px solid ${C.border}` }}>
-                    <label htmlFor="mj-reminder-time" style={{ color: C.text, fontSize: 14 }}>Remind me at</label>
-                    <input id="mj-reminder-time" type="time" value={reminderTime}
-                      onChange={e => saveReminderPrefs(reminderEnabled, e.target.value)}
-                      style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10,
-                        padding: "8px 12px", color: C.text, fontFamily: "inherit", fontSize: 15, outline: "none" }} />
-                  </div>
+                  <>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                      marginTop: 16, paddingTop: 14, borderTop: `1px solid ${C.border}` }}>
+                      <label htmlFor="mj-reminder-time" style={{ color: C.text, fontSize: 14 }}>Remind me at</label>
+                      <input id="mj-reminder-time" type="time" value={reminderTime}
+                        onChange={e => saveReminderPrefs(reminderEnabled, e.target.value)}
+                        style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10,
+                          padding: "8px 12px", color: C.text, fontFamily: "inherit", fontSize: 15, outline: "none" }} />
+                    </div>
+                    <div style={{ color: "#B9A892", fontSize: 11.5, fontStyle: "italic", marginTop: 8, lineHeight: 1.45 }}>
+                      Evenings work well — you'll have the whole day to look back on.
+                    </div>
+                  </>
                 )}
 
                 <div style={{ color: C.muted, fontSize: 12, marginTop: 14, lineHeight: 1.5 }}>
