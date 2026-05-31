@@ -42,6 +42,25 @@ const MOODS = [
 ];
 const TAGS = ["family", "nature", "work", "food", "friends", "simple joy"];
 
+// Optional thinking aids for the add-moment sheet. Never saved — just sparks.
+// Varied on purpose: gratitude, humor, small joys, people, senses, wins, nature.
+const INSPIRATION_PROMPTS = [
+  "What made you laugh recently?",
+  "Who are you grateful for today?",
+  "What's something small that went right?",
+  "What did you notice today that you'd normally miss?",
+  "What's a moment with someone you love?",
+  "What made you feel calm today?",
+  "What's a tiny thing that tasted, sounded, or smelled good?",
+  "What did you do today that you're a little proud of?",
+  "Where did you see something beautiful outside?",
+  "Who made your day a little easier?",
+  "What's a small kindness you gave or received?",
+  "What surprised you in a good way?",
+  "When did you feel most like yourself today?",
+  "What's a comfort you leaned on today?",
+];
+
 // ── localStorage keys ───────────────────────────────────────────────────────
 const LS_MOMENTS = "mj_moments_v1";
 
@@ -546,6 +565,9 @@ export default function App() {
   const [draftMood, setDraftMood] = useState(null);
   const [draftTag, setDraftTag] = useState(null);
   const [dropping, setDropping] = useState(false);
+  // Optional inspiration prompt (stays hidden until the user asks for it)
+  const [showPrompt, setShowPrompt] = useState(false);
+  const [promptIndex, setPromptIndex] = useState(0);
 
   // Browse filters
   const [filterMood, setFilterMood] = useState(null);
@@ -570,6 +592,23 @@ export default function App() {
 
   // Clear any pending celebration timer on unmount
   useEffect(() => () => { if (celebrateTimer.current) clearTimeout(celebrateTimer.current); }, []);
+
+  // Each time the add sheet opens, tuck the inspiration prompt away again.
+  useEffect(() => { if (addOpen) setShowPrompt(false); }, [addOpen]);
+
+  // Reveal a prompt (start on a random one), or shuffle to a different one.
+  const revealPrompt = () => {
+    setPromptIndex(Math.floor(Math.random() * INSPIRATION_PROMPTS.length));
+    setShowPrompt(true);
+  };
+  const shufflePrompt = () => {
+    setPromptIndex(prev => {
+      if (INSPIRATION_PROMPTS.length < 2) return prev;
+      let n = prev;
+      while (n === prev) n = Math.floor(Math.random() * INSPIRATION_PROMPTS.length);
+      return n;
+    });
+  };
 
   // ── Persist locally whenever moments change ──
   useEffect(() => { saveMomentsLocal(moments); }, [moments]);
@@ -1136,9 +1175,34 @@ export default function App() {
             <div style={{ fontFamily: "'Instrument Serif',serif", fontSize: 22, color: C.dark, marginBottom: 4 }}>
               A good moment today
             </div>
-            <div style={{ color: C.muted, fontSize: 13.5, marginBottom: 16 }}>
+            <div style={{ color: C.muted, fontSize: 13.5, marginBottom: 12 }}>
               Keep it short — a sentence or two is perfect.
             </div>
+
+            {/* Optional inspiration — subtle until asked for, never saved */}
+            {!showPrompt ? (
+              <button onClick={revealPrompt} style={{ background: "none", border: "none", padding: 0,
+                marginBottom: 12, color: C.accent, fontFamily: "inherit", fontSize: 13, fontWeight: 600,
+                cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                💭 Need inspiration?
+              </button>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.cream,
+                border: `1px solid ${C.border}`, borderRadius: 12, padding: "10px 10px 10px 14px",
+                marginBottom: 12, animation: "mjfade .2s ease" }}>
+                <div style={{ flex: 1, fontFamily: "'Instrument Serif',serif", fontStyle: "italic",
+                  fontSize: 16, color: C.accentD, lineHeight: 1.4 }}>
+                  {INSPIRATION_PROMPTS[promptIndex]}
+                </div>
+                <button onClick={shufflePrompt} aria-label="Show another prompt" title="Another prompt"
+                  style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 10, width: 34, height: 34,
+                    cursor: "pointer", color: C.accent, fontSize: 17, flexShrink: 0, display: "flex",
+                    alignItems: "center", justifyContent: "center", lineHeight: 1 }}>↻</button>
+                <button onClick={() => setShowPrompt(false)} aria-label="Hide prompt" title="Hide"
+                  style={{ background: "none", border: "none", color: C.muted, fontSize: 15, cursor: "pointer",
+                    flexShrink: 0, padding: 4, lineHeight: 1 }}>✕</button>
+              </div>
+            )}
 
             <textarea className="mj-inp" rows={3} maxLength={280} autoFocus
               placeholder="Something small and good that happened…"
