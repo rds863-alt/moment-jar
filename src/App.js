@@ -333,6 +333,16 @@ async function deleteMomentRemote(userId, id) {
   } catch { return false; }
 }
 
+async function updateMomentRemote(userId, id, fields) {
+  try {
+    const res = await sbFetch(`moments?id=eq.${id}&user_id=eq.${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify(fields),
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
 async function savePreferences(userId, fields) {
   try {
     const res = await sbFetch("preferences", {
@@ -365,11 +375,13 @@ function saveMomentsLocal(moments) {
 }
 
 // ── Date helpers ───────────────────────────────────────────────────────────────
+// The user's LOCAL calendar date as YYYY-MM-DD — the day it is for *them*,
+// never UTC. (Intl en-CA yields YYYY-MM-DD in the browser's own time zone, so
+// a moment added at 11pm is dated today, not tomorrow-in-UTC.)
 function todayStr() {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
 }
 // The browser's IANA time zone (e.g. "America/New_York") — saved with reminder
 // prefs so the daily-reminders function can fire at the user's real local time.
@@ -377,8 +389,10 @@ function getTimeZone() {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch { return null; }
 }
 function parseDate(s) {
-  // Parse YYYY-MM-DD as a LOCAL date (avoid UTC shift)
-  const [y, m, d] = (s || "").split("-").map(Number);
+  // Parse the YYYY-MM-DD prefix as a LOCAL date. Slicing to 10 chars tolerates
+  // any stray time component and avoids the classic `new Date("YYYY-MM-DD")`
+  // UTC-midnight shift that pushes dates a day off in negative-offset zones.
+  const [y, m, d] = String(s || "").slice(0, 10).split("-").map(Number);
   return new Date(y, (m || 1) - 1, d || 1);
 }
 function formatDate(s) {
@@ -477,7 +491,7 @@ function Jar({ count, fraction, celebrate }) {
 }
 
 // ── Small UI bits ──────────────────────────────────────────────────────────────
-function MomentCard({ m, onDelete }) {
+function MomentCard({ m, onDelete, onEdit }) {
   return (
     <div style={{
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 16,
@@ -496,11 +510,21 @@ function MomentCard({ m, onDelete }) {
           )}
         </div>
       </div>
-      {onDelete && (
-        <button onClick={() => onDelete(m)} title="Remove" style={{
-          background: "none", border: "none", color: C.muted, cursor: "pointer",
-          fontSize: 16, padding: 2, lineHeight: 1, flexShrink: 0
-        }}>✕</button>
+      {(onEdit || onDelete) && (
+        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+          {onEdit && (
+            <button onClick={() => onEdit(m)} title="Edit" aria-label="Edit moment" style={{
+              background: "none", border: "none", color: C.muted, cursor: "pointer",
+              fontSize: 15, padding: 2, lineHeight: 1
+            }}>✎</button>
+          )}
+          {onDelete && (
+            <button onClick={() => onDelete(m)} title="Remove" aria-label="Remove moment" style={{
+              background: "none", border: "none", color: C.muted, cursor: "pointer",
+              fontSize: 16, padding: 2, lineHeight: 1
+            }}>✕</button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -679,6 +703,13 @@ export default function App() {
   // Optional inspiration prompt (stays hidden until the user asks for it)
   const [showPrompt, setShowPrompt] = useState(false);
   const [promptIndex, setPromptIndex] = useState(0);
+
+  // Editing an existing moment (text / mood / tag)
+  const [editMoment, setEditMoment] = useState(null);
+  const [editText, setEditText] = useState("");
+  const [editMood, setEditMood] = useState(null);
+  const [editTag, setEditTag] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // Browse filters
   const [filterMood, setFilterMood] = useState(null);
@@ -897,6 +928,32 @@ export default function App() {
     }
   };
 
+  // ── Edit an existing moment (text / mood / tag) ──
+  const openEdit = (m) => {
+    setEditMoment(m);
+    setEditText(m.text || "");
+    setEditMood(m.mood || null);
+    setEditTag(m.tag || null);
+  };
+
+  const saveEdit = async () => {
+    const text = editText.trim();
+    if (!editMoment || !text) return;
+    setSavingEdit(true);
+    const id = editMoment.id;
+    const fields = { text, mood: editMood || "✨", tag: editTag || null };
+    const next = moments.map(x => x.id === id ? { ...x, ...fields } : x);
+    setMoments(next);
+    saveMomentsLocal(next);
+    setEditMoment(null); setSavingEdit(false);
+    showToast("Moment updated ✨");
+    // Persist the edit to the account; surface failure gently (retries on sync).
+    if (currentUser?.id) {
+      const ok = await updateMomentRemote(currentUser.id, id, fields);
+      if (!ok) showToast("Saved on this device — it'll sync to your account later");
+    }
+  };
+
   // ── Derived data ──
   const currentYear = new Date().getFullYear();
   const thisYearMoments = useMemo(
@@ -931,7 +988,8 @@ export default function App() {
   }, [moments]);
 
   // Keep the random pick valid if it gets deleted during the session
-  const randomPastMoment = randomPast && moments.some(m => m.id === randomPast.id) ? randomPast : null;
+  // Resolve from current state by id so edits/deletes reflect in the card too.
+  const randomPastMoment = randomPast ? (moments.find(m => m.id === randomPast.id) || null) : null;
 
   const filtered = useMemo(() => moments.filter(m =>
     (!filterMood || m.mood === filterMood) && (!filterTag || m.tag === filterTag)
@@ -1209,7 +1267,7 @@ export default function App() {
                   <div style={{ fontSize: 13, fontWeight: 600, color: C.muted, textTransform: "uppercase",
                     letterSpacing: ".5px", marginBottom: 12 }}>Recently added</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {recents.map(m => <MomentCard key={m.id} m={m} onDelete={deleteMoment} />)}
+                    {recents.map(m => <MomentCard key={m.id} m={m} onEdit={openEdit} onDelete={deleteMoment} />)}
                   </div>
                   {moments.length > recents.length && (
                     <button onClick={() => setTab("browse")} style={{ background: "none", border: "none",
@@ -1256,7 +1314,7 @@ export default function App() {
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
-                {filtered.map(m => <MomentCard key={m.id} m={m} onDelete={deleteMoment} />)}
+                {filtered.map(m => <MomentCard key={m.id} m={m} onEdit={openEdit} onDelete={deleteMoment} />)}
               </div>
             )}
           </div>
@@ -1348,6 +1406,62 @@ export default function App() {
               {dropping ? "Dropping…" : "Drop it in the jar"}
             </button>
             <button onClick={() => setAddOpen(false)} disabled={dropping} style={{ background: "none", border: "none",
+              color: C.muted, fontSize: 14, cursor: "pointer", width: "100%", marginTop: 12, fontFamily: "inherit" }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit moment overlay ──────────────────────────────────── */}
+      {editMoment && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(26,10,0,.45)", zIndex: 50,
+          display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+          onClick={() => !savingEdit && setEditMoment(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: C.bg, width: "100%", maxWidth: 560,
+            borderRadius: "22px 22px 0 0", padding: "20px 22px calc(24px + env(safe-area-inset-bottom))",
+            animation: "mjfade .25s ease", maxHeight: "92vh", overflowY: "auto" }}>
+            <div style={{ width: 40, height: 4, background: C.border, borderRadius: 99, margin: "0 auto 18px" }} />
+            <div style={{ fontFamily: "'Instrument Serif',serif", fontSize: 22, color: C.dark, marginBottom: 4 }}>
+              Edit this moment
+            </div>
+            <div style={{ color: C.muted, fontSize: 13.5, marginBottom: 16 }}>
+              Fix a typo or change how it felt — the date stays as it was.
+            </div>
+
+            <textarea className="mj-inp" rows={3} maxLength={280} autoFocus
+              placeholder="Something small and good that happened…"
+              value={editText} onChange={e => setEditText(e.target.value)}
+              style={{ resize: "none", lineHeight: 1.5 }} />
+            <div style={{ textAlign: "right", color: C.muted, fontSize: 11, marginTop: 4 }}>
+              {editText.length}/280
+            </div>
+
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.muted, margin: "14px 0 10px" }}>How did it feel?</div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "space-between" }}>
+              {MOODS.map(mo => (
+                <button key={mo.emoji} className={`mj-mood ${editMood === mo.emoji ? "on" : ""}`}
+                  title={mo.label} onClick={() => setEditMood(editMood === mo.emoji ? null : mo.emoji)}>
+                  {mo.emoji}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.muted, margin: "18px 0 10px" }}>
+              Tag it <span style={{ fontWeight: 400 }}>(optional)</span>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {TAGS.map(t => (
+                <button key={t} className={`mj-chip ${editTag === t ? "on" : ""}`}
+                  onClick={() => setEditTag(editTag === t ? null : t)}>{t}</button>
+              ))}
+            </div>
+
+            <button className="mj-btn" style={{ marginTop: 22 }} disabled={!editText.trim() || savingEdit}
+              onClick={saveEdit}>
+              {savingEdit ? "Saving…" : "Save changes"}
+            </button>
+            <button onClick={() => setEditMoment(null)} disabled={savingEdit} style={{ background: "none", border: "none",
               color: C.muted, fontSize: 14, cursor: "pointer", width: "100%", marginTop: 12, fontFamily: "inherit" }}>
               Cancel
             </button>
