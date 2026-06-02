@@ -1377,8 +1377,11 @@ export default function App() {
               placeholder="Something small and good that happened…"
               value={draftText} onChange={e => setDraftText(e.target.value)}
               style={{ resize: "none", lineHeight: 1.5 }} />
-            <div style={{ textAlign: "right", color: C.muted, fontSize: 11, marginTop: 4 }}>
-              {draftText.length}/280
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 4 }}>
+              <span style={{ color: "#B9A892", fontSize: 11.5, lineHeight: 1.4 }}>
+                Tip: tap the 🎤 on your keyboard to speak your moment.
+              </span>
+              <span style={{ color: C.muted, fontSize: 11, flexShrink: 0 }}>{draftText.length}/280</span>
             </div>
 
             <div style={{ fontSize: 13, fontWeight: 600, color: C.muted, margin: "14px 0 10px" }}>How did it feel?</div>
