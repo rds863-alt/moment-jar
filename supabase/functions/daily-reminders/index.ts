@@ -13,15 +13,54 @@ const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // e.g. cron every 30 min  -> WINDOW_MINUTES = 30.
 const WINDOW_MINUTES = 30;
 
-// A few gentle, rotating prompts so the daily email never feels robotic.
-// Warm and brief — never streak-shaming.
-const PROMPTS = [
+// Warm, varied copy so the daily email never feels robotic or naggy. Subjects
+// and body openers are chosen INDEPENDENTLY on each send, so the combinations
+// multiply and an email rarely reads the same twice. Gentle voice throughout —
+// inviting, never streak-shaming. (Tone drawn from the in-app inspiration
+// prompts, but written to read naturally as email copy.)
+const SUBJECTS = [
   "What was one good thing today?",
-  "What made you smile today?",
+  "A moment worth keeping?",
   "Anything small and good happen today?",
-  "One little moment worth keeping?",
+  "What made you smile today?",
+  "One little moment for your jar?",
+  "Got a good thing to tuck away?",
   "What are you glad happened today?",
+  "A small good thing, before the day's done?",
+  "Something worth remembering today?",
+  "What's one bright spot from today?",
+  "Care to drop a moment in the jar?",
+  "What made today a little better?",
 ];
+
+const OPENERS = [
+  "What was one good thing about today?",
+  "Got a moment worth keeping from today?",
+  "What's one small thing that went right?",
+  "Did anything today make you smile?",
+  "What's a little bright spot from your day?",
+  "What's one thing you're glad happened today?",
+  "Something small and good you'd like to remember?",
+  "What made today a little better than it might've been?",
+  "What's a tiny moment worth saving?",
+  "What's one thing from today you don't want to forget?",
+  "What felt good today, even in a small way?",
+  "What's worth dropping into your jar today?",
+];
+
+// Sensible defaults if anything goes wrong picking a variant — the email still
+// sends with warm, on-brand copy.
+const FALLBACK_SUBJECT = "What was one good thing today?";
+const FALLBACK_OPENER = "What was one good thing about today?";
+
+// Random index that differs from `last`, mirroring the in-app inspiration-prompt
+// shuffle (which never lands on the current prompt). `last = -1` means no prior.
+function pickDifferent(len: number, last: number): number {
+  if (len <= 1) return 0;
+  let n = Math.floor(Math.random() * len);
+  while (n === last) n = Math.floor(Math.random() * len);
+  return n;
+}
 
 function toMinutes(hhmm: string | null): number | null {
   if (!hhmm) return null;
@@ -65,26 +104,10 @@ function tzDateStr(tz: string): string {
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
-serve(async (_req) => {
-  try {
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-
-    // Users who have opted in to reminders.
-    const { data: prefs } = await supabase
-      .from("preferences")
-      .select("user_id, email, reminder_time, reminder_enabled, timezone")
-      .eq("reminder_enabled", true);
-
-    if (!prefs || prefs.length === 0) {
-      return new Response("No users with reminders enabled", { status: 200 });
-    }
-
-    // One gentle prompt for the whole run, rotating by day so it changes daily.
-    const now = new Date();
-    const dayIndex = Math.floor(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) / 86400000);
-    const prompt = PROMPTS[dayIndex % PROMPTS.length];
-
-    const html = `
+// The email HTML. Only the opener line varies — the amber styling, jar icon,
+// supporting copy, CTA link, and footer all stay exactly as before.
+function renderHtml(opener: string): string {
+  return `
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -101,7 +124,7 @@ serve(async (_req) => {
     <div style="padding:32px 28px;text-align:center">
       <div style="font-size:34px;line-height:1">🫙</div>
       <div style="font-size:21px;font-weight:600;color:#3D2A1C;margin-top:14px;line-height:1.35">
-        ${prompt}
+        ${opener}
       </div>
       <div style="font-size:15px;color:#8A7866;margin-top:12px;line-height:1.6">
         Take a few seconds to drop one small good thing into your jar.
@@ -129,6 +152,41 @@ serve(async (_req) => {
   </div>
 </body>
 </html>`;
+}
+
+serve(async (_req) => {
+  try {
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+    // Users who have opted in to reminders.
+    const { data: prefs } = await supabase
+      .from("preferences")
+      .select("user_id, email, reminder_time, reminder_enabled, timezone")
+      .eq("reminder_enabled", true);
+
+    if (!prefs || prefs.length === 0) {
+      return new Response("No users with reminders enabled", { status: 200 });
+    }
+
+    // Seed the "last used" indices from a tiny persisted state record so the
+    // first send of this run differs from the previous run's last send too.
+    // Degrades gracefully: if the table doesn't exist yet, we just start at -1
+    // and still avoid repeats within this run (function-level dedup).
+    let lastSubject = -1;
+    let lastOpener = -1;
+    try {
+      const { data: state } = await supabase
+        .from("reminder_email_state")
+        .select("last_subject, last_opener")
+        .eq("id", 1)
+        .maybeSingle();
+      if (state) {
+        if (typeof state.last_subject === "number") lastSubject = state.last_subject;
+        if (typeof state.last_opener === "number") lastOpener = state.last_opener;
+      }
+    } catch (_e) {
+      // No state record/table — fall back to in-run dedup only.
+    }
 
     let emailsSent = 0;
     let skippedAlreadyAdded = 0;
@@ -156,6 +214,21 @@ serve(async (_req) => {
         .limit(1);
       if (todays && todays.length > 0) { skippedAlreadyAdded++; continue; }
 
+      // Pick a subject and a body opener independently, each different from the
+      // last one used. Safe fallback to sensible defaults if anything throws.
+      let subject = FALLBACK_SUBJECT;
+      let opener = FALLBACK_OPENER;
+      try {
+        const si = pickDifferent(SUBJECTS.length, lastSubject);
+        const oi = pickDifferent(OPENERS.length, lastOpener);
+        subject = SUBJECTS[si] ?? FALLBACK_SUBJECT;
+        opener = OPENERS[oi] ?? FALLBACK_OPENER;
+        lastSubject = si;
+        lastOpener = oi;
+      } catch (_e) {
+        // Keep the fallback subject/opener.
+      }
+
       // Send the gentle reminder via Resend.
       const emailRes = await fetch("https://api.resend.com/emails", {
         method: "POST",
@@ -167,12 +240,24 @@ serve(async (_req) => {
           from: "Moment Jar <reminders@lifeontrack.app>",
           reply_to: "rds86@duck.com",
           to: pref.email,
-          subject: `${prompt} ✨`,
-          html,
+          subject,
+          html: renderHtml(opener),
         }),
       });
 
       if (emailRes.ok) emailsSent++;
+    }
+
+    // Remember the last variants used so the next run won't immediately repeat
+    // them. Best-effort: ignore failures (e.g. the state table not existing).
+    if (lastSubject >= 0 || lastOpener >= 0) {
+      try {
+        await supabase
+          .from("reminder_email_state")
+          .upsert({ id: 1, last_subject: lastSubject, last_opener: lastOpener });
+      } catch (_e) {
+        // Persistence is a nicety, not required for correctness.
+      }
     }
 
     return new Response(

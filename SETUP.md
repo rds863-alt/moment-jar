@@ -155,6 +155,27 @@ supabase secrets set RESEND_API_KEY=your_resend_api_key --project-ref afhcuanapg
 
 Make sure `pg_cron` and `pg_net` are enabled (Database → Extensions).
 
+### Rotating reminder copy (optional state table)
+
+The daily reminder picks a random subject line and a random body opener on each
+send, never repeating the one used on the immediately previous send. To make that
+"don't repeat" hold *across* runs (not just within a single run), create this tiny
+one-row state table. The function reads/writes it best-effort — if the table is
+missing it still rotates and just de-dupes within each run.
+
+```sql
+create table if not exists public.reminder_email_state (
+  id           int  primary key default 1,
+  last_subject int  not null default -1,
+  last_opener  int  not null default -1,
+  constraint reminder_email_state_single check (id = 1)
+);
+insert into public.reminder_email_state (id) values (1) on conflict (id) do nothing;
+
+-- Only the edge function (service role) touches this; lock everyone else out.
+alter table public.reminder_email_state enable row level security;
+```
+
 ### Deploy
 
 ```bash
