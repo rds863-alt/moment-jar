@@ -469,6 +469,168 @@ function formatWarmDate(s) {
 }
 function truncate(s, n) { return (s || "").length > n ? (s || "").slice(0, n - 1).trimEnd() + "…" : (s || ""); }
 function moodEmoji(m) { return m || "✨"; }
+// The mood's human label (e.g. "😊" → "Happy"). Used in the PDF book, where
+// color emoji can't be embedded reliably — we print the name instead.
+function moodLabelOf(emoji) { return (MOODS.find(m => m.emoji === emoji)?.label) || ""; }
+
+// ════════════════════════════════════════════════════════════════════════════
+//  Year-in-review printable book (client-side PDF via jsPDF, lazy-loaded)
+//  Pure function of already-loaded moments — no backend involved.
+// ════════════════════════════════════════════════════════════════════════════
+async function generateYearBook(year, moments) {
+  // jsPDF is dynamically imported so it ships as its own chunk and only
+  // downloads when someone actually makes a book (keeps the main bundle lean).
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+
+  const W = 210, H = 297, M = 20;          // page + margin (mm)
+  const CW = W - M * 2;                      // content width
+  const BOTTOM = H - 20;                      // last usable baseline (above footer)
+  const COL = {
+    accent: "#C84B11", bg: "#FFF8F0", dark: "#6B3410",
+    muted: "#8A7866", border: "#EADBCB",
+  };
+
+  const MONTHS = ["January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"];
+
+  // This year's moments, oldest first (date, then created_at as a tiebreak).
+  const items = moments
+    .filter(m => parseDate(m.date).getFullYear() === year)
+    .sort((a, b) =>
+      (a.date || "").localeCompare(b.date || "") ||
+      (a.created_at || "").localeCompare(b.created_at || ""));
+
+  // ── Cover page ──────────────────────────────────────────────────────────
+  doc.setFillColor(COL.bg);
+  doc.rect(0, 0, W, H, "F");
+
+  // Jar — same fill formula as the home jar so the cover matches year-end.
+  const fraction = items.length === 0 ? 0
+    : Math.max(0.05, Math.min(items.length / FILL_GOAL, 1));
+  const bodyX = 83, bodyTop = 70, bodyW = 44, bodyH = 60, corner = 6;
+  const innerTop = bodyTop + 4, innerBottom = bodyTop + bodyH - 3;
+  const innerH = innerBottom - innerTop, innerX = bodyX + 3, innerW = bodyW - 6;
+  const fillH = fraction <= 0 ? 0 : Math.max(2, fraction * innerH);
+  const fillY = innerBottom - fillH;
+  // liquid (drawn first, glass outline goes on top)
+  if (fillH > 0) {
+    doc.setFillColor(COL.accent);
+    doc.roundedRect(innerX, fillY, innerW, fillH, Math.min(3, fillH / 2), Math.min(3, fillH / 2), "F");
+  }
+  // glass body outline
+  doc.setDrawColor(COL.dark);
+  doc.setLineWidth(0.9);
+  doc.roundedRect(bodyX, bodyTop, bodyW, bodyH, corner, corner, "S");
+  // lid
+  doc.setFillColor(COL.dark);
+  doc.roundedRect(105 - 13, bodyTop - 8, 26, 8, 2, 2, "F");
+
+  doc.setTextColor(COL.accent);
+  doc.setFont("times", "bold");
+  doc.setFontSize(46);
+  doc.text(String(year), 105, 160, { align: "center" });
+
+  doc.setTextColor(COL.dark);
+  doc.setFont("times", "italic");
+  doc.setFontSize(17);
+  doc.text("A Year of Moments", 105, 172, { align: "center" });
+
+  doc.setTextColor(COL.muted);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+  const noun = items.length === 1 ? "moment" : "moments";
+  doc.text(`${items.length} ${noun} captured with Moment Jar`, 105, 184, { align: "center" });
+  doc.setFontSize(10.5);
+  doc.text(`January – December ${year}`, 105, 191, { align: "center" });
+
+  // ── Interior pages ──────────────────────────────────────────────────────
+  const DATE_LH = 5, BODY_LH = 5, META_LH = 6, PRE_GAP = 3, HEAD_LH = 9;
+  let y = M;
+  const newPage = () => { doc.addPage(); y = M; };
+
+  const momentHeight = (lines) => PRE_GAP + DATE_LH + lines.length * BODY_LH + META_LH;
+
+  const drawMoment = (m, lines) => {
+    y += PRE_GAP;
+    // date
+    y += DATE_LH;
+    doc.setTextColor(COL.accent);
+    doc.setFont("times", "italic");
+    doc.setFontSize(10.5);
+    doc.text(formatWarmDate(m.date), M, y);
+    // text
+    doc.setTextColor(COL.dark);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    lines.forEach(ln => { y += BODY_LH; doc.text(ln, M, y); });
+    // mood label + tag
+    const parts = [];
+    const ml = moodLabelOf(m.mood);
+    if (ml) parts.push(ml);
+    if (m.tag) parts.push(m.tag);
+    if (parts.length) {
+      y += META_LH;
+      doc.setTextColor(COL.muted);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text(parts.join("   ·   "), M, y);
+    } else {
+      y += META_LH;
+    }
+  };
+
+  const drawHeading = (label) => {
+    y += HEAD_LH;
+    doc.setTextColor(COL.dark);
+    doc.setFont("times", "bold");
+    doc.setFontSize(15);
+    doc.text(label, M, y);
+    y += 2.5;
+    doc.setDrawColor(COL.border);
+    doc.setLineWidth(0.3);
+    doc.line(M, y, M + CW, y);
+    y += 2;
+  };
+
+  if (items.length > 0) {
+    doc.addPage();
+    y = M;
+    let curMonth = null;
+    items.forEach(m => {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      const lines = doc.splitTextToSize(m.text || "", CW);
+      const mh = momentHeight(lines);
+      const mk = String(m.date || "").slice(0, 7);
+      if (mk !== curMonth) {
+        curMonth = mk;
+        const [yy, mm] = mk.split("-").map(Number);
+        const label = `${MONTHS[(mm || 1) - 1]} ${yy}`;
+        // Keep the heading with its first moment — never orphan it at a page foot.
+        if (y + HEAD_LH + 4.5 + mh > BOTTOM) newPage();
+        drawHeading(label);
+      } else if (y + mh > BOTTOM) {
+        // A single moment never splits across a page break.
+        newPage();
+      }
+      drawMoment(m, lines);
+    });
+  }
+
+  // ── Footers (page numbers on interior pages only) ───────────────────────
+  const pages = doc.getNumberOfPages();
+  for (let p = 2; p <= pages; p++) {
+    doc.setPage(p);
+    doc.setTextColor(COL.muted);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.text(`Moment Jar · ${year}`, M, H - 12);
+    doc.text(`${p - 1}`, W - M, H - 12, { align: "right" });
+  }
+
+  doc.save(`Moment Jar — ${year}.pdf`);
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 //  Jar illustration — fills as moments accumulate
@@ -815,6 +977,8 @@ export default function App() {
   const [addOpen, setAddOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false); // "Open your jar" year-in-review
+  const [bookOpen, setBookOpen] = useState(false);     // printable-book year picker
+  const [bookBusy, setBookBusy] = useState(null);      // year currently generating, or null
   const [toast, setToast] = useState(null);
   const [animIn, setAnimIn] = useState(false);
 
@@ -1179,6 +1343,33 @@ export default function App() {
   );
   const canOpenJar = reviewChrono.length >= 10;
 
+  // Completed years (strictly before the current year) that have at least one
+  // moment — each becomes a selectable printable book. Newest first. The
+  // in-progress current year is never offered. [count kept for the picker UI]
+  const completedYears = useMemo(() => {
+    const counts = {};
+    moments.forEach(m => {
+      const y = parseDate(m.date).getFullYear();
+      if (y < currentYear) counts[y] = (counts[y] || 0) + 1;
+    });
+    return Object.keys(counts).map(Number).sort((a, b) => b - a)
+      .map(year => ({ year, count: counts[year] }));
+  }, [moments, currentYear]);
+
+  const makeBook = async (year) => {
+    if (bookBusy) return;
+    setBookBusy(year);
+    try {
+      await generateYearBook(year, moments);
+      showToast(`Your ${year} book is ready ✨`);
+      setBookOpen(false);
+    } catch {
+      showToast("Couldn't make the book — please try again");
+    } finally {
+      setBookBusy(null);
+    }
+  };
+
   const onThisDay = useMemo(() => {
     const td = parseDate(todayStr());
     const mmdd = `${String(td.getMonth() + 1).padStart(2, "0")}-${String(td.getDate()).padStart(2, "0")}`;
@@ -1488,6 +1679,17 @@ export default function App() {
                   boxShadow: "0 6px 18px rgba(26,10,0,.22)" }}>
                   ✨ Open your jar
                 </button>
+              )}
+
+              {/* Printable book — subtle link, only once a completed year exists */}
+              {completedYears.length > 0 && (
+                <div>
+                  <button onClick={() => setBookOpen(true)} style={{ marginTop: canOpenJar ? 14 : 20,
+                    background: "none", border: "none", color: C.accent, fontSize: 14, fontWeight: 600,
+                    cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    📖 Make a printable book
+                  </button>
+                </div>
               )}
             </div>
 
@@ -1819,6 +2021,51 @@ export default function App() {
             </div>
             <button onClick={() => setSettingsOpen(false)} style={{ background: "none", border: "none",
               color: C.muted, fontSize: 14, cursor: "pointer", width: "100%", marginTop: 12, fontFamily: "inherit" }}>
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Printable book — year picker ─────────────────────────── */}
+      {bookOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(26,10,0,.45)", zIndex: 55,
+          display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+          onClick={() => !bookBusy && setBookOpen(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: C.bg, width: "100%", maxWidth: 560,
+            borderRadius: "22px 22px 0 0", padding: "20px 22px calc(24px + env(safe-area-inset-bottom))",
+            animation: "mjfade .25s ease", maxHeight: "92vh", overflowY: "auto" }}>
+            <div style={{ width: 40, height: 4, background: C.border, borderRadius: 99, margin: "0 auto 18px" }} />
+            <div style={{ fontFamily: "'Instrument Serif',serif", fontSize: 22, color: C.dark, marginBottom: 4 }}>
+              Your printable book
+            </div>
+            <div style={{ color: C.muted, fontSize: 13.5, marginBottom: 16, lineHeight: 1.5 }}>
+              Each completed year becomes a little keepsake — a cover and every moment,
+              ready to print or save as a PDF.
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {completedYears.map(({ year, count }) => (
+                <button key={year} onClick={() => makeBook(year)} disabled={!!bookBusy}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+                    background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: "14px 16px",
+                    cursor: bookBusy ? "default" : "pointer", fontFamily: "inherit", textAlign: "left",
+                    opacity: bookBusy && bookBusy !== year ? 0.5 : 1 }}>
+                  <div>
+                    <div style={{ fontFamily: "'Instrument Serif',serif", fontSize: 20, color: C.dark }}>{year}</div>
+                    <div style={{ color: C.muted, fontSize: 12.5, marginTop: 2 }}>
+                      {count} {count === 1 ? "moment" : "moments"}
+                    </div>
+                  </div>
+                  <span style={{ color: C.accent, fontSize: 14, fontWeight: 600, flexShrink: 0 }}>
+                    {bookBusy === year ? "Preparing…" : "Download PDF →"}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <button onClick={() => setBookOpen(false)} disabled={!!bookBusy} style={{ background: "none", border: "none",
+              color: C.muted, fontSize: 14, cursor: "pointer", width: "100%", marginTop: 16, fontFamily: "inherit" }}>
               Close
             </button>
           </div>
