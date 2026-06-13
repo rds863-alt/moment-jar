@@ -182,6 +182,8 @@ const INSPIRATION_PROMPTS = [
 
 // ── localStorage keys ───────────────────────────────────────────────────────
 const LS_MOMENTS = "mj_moments_v1";
+const LS_CUSTOM_TAGS = "mj_custom_tags_v1"; // user-defined tags [{id,name,created_at}]
+const LS_HIDDEN_TAGS = "mj_hidden_tags_v1"; // supplied tag names the user has hidden
 
 const FILL_GOAL = 100; // moments that visually "fill" the jar to the brim
 
@@ -365,7 +367,7 @@ async function savePreferences(userId, fields) {
 async function loadPreferences(userId) {
   try {
     const res = await sbFetch(
-      `preferences?user_id=eq.${userId}&select=reminder_enabled,reminder_time`,
+      `preferences?user_id=eq.${userId}&select=reminder_enabled,reminder_time,hidden_tags`,
       { headers: { "Prefer": "" } }
     );
     if (!res.ok) return null;
@@ -374,12 +376,56 @@ async function loadPreferences(userId) {
   } catch { return null; }
 }
 
+// ── Custom tags (one row per user-defined tag) ──────────────────────────────────
+// Tags are just labels. A moment stores the tag *string* (never a foreign key),
+// so deleting a custom tag here NEVER orphans past moments — they keep their text.
+async function loadCustomTagsRemote(userId) {
+  try {
+    const res = await sbFetch(
+      `custom_tags?user_id=eq.${userId}&select=id,name,created_at&order=created_at.asc`,
+      { headers: { "Prefer": "" } }
+    );
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+async function saveCustomTagRemote(userId, t) {
+  try {
+    const res = await sbFetch("custom_tags", {
+      method: "POST",
+      headers: { "Prefer": "resolution=merge-duplicates" },
+      body: JSON.stringify({ id: t.id, user_id: userId, name: t.name, created_at: t.created_at })
+    });
+    return res.ok;
+  } catch { return false; }
+}
+
+async function deleteCustomTagRemote(userId, id) {
+  try {
+    const res = await sbFetch(`custom_tags?id=eq.${id}&user_id=eq.${userId}`, { method: "DELETE" });
+    return res.ok;
+  } catch { return false; }
+}
+
 // ── Local persistence ─────────────────────────────────────────────────────────
 function loadMomentsLocal() {
   try { const s = localStorage.getItem(LS_MOMENTS); return s ? JSON.parse(s) : []; } catch { return []; }
 }
 function saveMomentsLocal(moments) {
   try { localStorage.setItem(LS_MOMENTS, JSON.stringify(moments)); } catch {}
+}
+function loadCustomTagsLocal() {
+  try { const s = localStorage.getItem(LS_CUSTOM_TAGS); return s ? JSON.parse(s) : []; } catch { return []; }
+}
+function saveCustomTagsLocal(tags) {
+  try { localStorage.setItem(LS_CUSTOM_TAGS, JSON.stringify(tags)); } catch {}
+}
+function loadHiddenTagsLocal() {
+  try { const s = localStorage.getItem(LS_HIDDEN_TAGS); return s ? JSON.parse(s) : []; } catch { return []; }
+}
+function saveHiddenTagsLocal(names) {
+  try { localStorage.setItem(LS_HIDDEN_TAGS, JSON.stringify(names)); } catch {}
 }
 
 // ── Date helpers ───────────────────────────────────────────────────────────────
@@ -495,6 +541,71 @@ function Jar({ count, fraction, celebrate }) {
       {/* glass shine */}
       <path d="M60 64 L60 200" stroke="#fff" strokeWidth="5" strokeLinecap="round" opacity="0.35" />
     </svg>
+  );
+}
+
+// ── Tag picker ──────────────────────────────────────────────────────────────
+// Supplied (code-defined, minus this user's hidden ones) and custom tags render
+// as ONE flowing set of identical chips, plus a "＋ Add" chip. Each chip carries
+// a subtle × that hides (supplied) or deletes (custom) the tag. Selecting works
+// the same for either kind — it just sets the tag string onto the moment.
+function TagPicker({ selected, onSelect, supplied, custom, onAddCustom, onDeleteCustom, onHideSupplied }) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const inputRef = useRef(null);
+
+  useEffect(() => { if (adding && inputRef.current) inputRef.current.focus(); }, [adding]);
+
+  const chips = [
+    ...supplied.map(t => ({ key: "s:" + t, name: t, kind: "supplied" })),
+    ...custom.map(c => ({ key: "c:" + c.id, name: c.name, kind: "custom", id: c.id })),
+  ];
+
+  const commitAdd = () => {
+    const v = name.trim();
+    setName(""); setAdding(false);
+    if (!v) return;
+    // addCustomTag returns the canonical tag name to select (handles dedupe /
+    // re-showing a previously hidden supplied tag).
+    const canonical = onAddCustom(v) || v;
+    onSelect(canonical);
+  };
+
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      {chips.map(c => {
+        const on = selected === c.name;
+        return (
+          <span key={c.key} className={`mj-tagchip ${on ? "on" : ""}`}>
+            <button type="button" className="mj-tagchip-label"
+              onClick={() => onSelect(on ? null : c.name)}>{c.name}</button>
+            <button type="button" className="mj-tagchip-x"
+              title={c.kind === "custom" ? "Delete tag" : "Hide tag"}
+              aria-label={c.kind === "custom" ? `Delete tag ${c.name}` : `Hide tag ${c.name}`}
+              onClick={() => c.kind === "custom" ? onDeleteCustom(c.id, c.name) : onHideSupplied(c.name)}>
+              ×
+            </button>
+          </span>
+        );
+      })}
+
+      {adding ? (
+        <span className="mj-tagchip on" style={{ paddingLeft: 2 }}>
+          <input ref={inputRef} className="mj-tag-input" value={name} maxLength={24}
+            placeholder="New tag…"
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter") { e.preventDefault(); commitAdd(); }
+              else if (e.key === "Escape") { setName(""); setAdding(false); }
+            }}
+            onBlur={commitAdd} />
+        </span>
+      ) : (
+        <button type="button" className="mj-tagchip mj-tagchip-add" onClick={() => setAdding(true)}>
+          ＋ Add
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -696,6 +807,10 @@ export default function App() {
   const [authError, setAuthError] = useState("");
 
   const [moments, setMoments] = useState(() => loadMomentsLocal());
+  // User-defined tags + the supplied tags this user has hidden. Both load
+  // instantly from localStorage, then sync from the account in the background.
+  const [customTags, setCustomTags] = useState(() => loadCustomTagsLocal());
+  const [hiddenTags, setHiddenTags] = useState(() => loadHiddenTagsLocal());
   const [tab, setTab] = useState("jar"); // jar|browse
   const [addOpen, setAddOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -760,8 +875,10 @@ export default function App() {
     });
   };
 
-  // ── Persist locally whenever moments change ──
+  // ── Persist locally whenever moments / tags change ──
   useEffect(() => { saveMomentsLocal(moments); }, [moments]);
+  useEffect(() => { saveCustomTagsLocal(customTags); }, [customTags]);
+  useEffect(() => { saveHiddenTagsLocal(hiddenTags); }, [hiddenTags]);
 
   // ── Pick one random past moment per app open ("✨ From your jar") ──
   // Locks to the first time we have >1 moment this session, then holds steady
@@ -793,11 +910,7 @@ export default function App() {
         setAuthScreen("app");
         setAuthChecked(true);
         await savePreferences(user.id, { email: user.email });
-        const prefs = await loadPreferences(user.id);
-        if (prefs) {
-          setReminderEnabled(prefs.reminder_enabled === true);
-          setReminderTime(prefs.reminder_time || "20:00");
-        }
+        await hydrateUserData(user.id);
         await syncMoments(user.id);
       } else {
         if (local.length === 0) setAuthScreen("landing");
@@ -836,6 +949,97 @@ export default function App() {
     } catch {}
   };
 
+  // Merge remote + local custom tags by id; upload any local-only ones.
+  const syncCustomTags = async (userId) => {
+    try {
+      const remote = await loadCustomTagsRemote(userId);
+      if (remote == null) return; // offline / error — keep local
+      const local = loadCustomTagsLocal();
+      const byId = {};
+      remote.forEach(t => { byId[t.id] = { id: t.id, name: t.name, created_at: t.created_at }; });
+      const localOnly = local.filter(t => !byId[t.id]);
+      for (const t of localOnly) { await saveCustomTagRemote(userId, t); byId[t.id] = t; }
+      const merged = Object.values(byId).sort((a, b) =>
+        (a.created_at || "").localeCompare(b.created_at || ""));
+      setCustomTags(merged);
+      saveCustomTagsLocal(merged);
+    } catch {}
+  };
+
+  // Load reminder prefs + hidden-tags list, then sync custom tags. Shared by the
+  // mount path and the post-verify path so both stay in step.
+  const hydrateUserData = async (userId) => {
+    const prefs = await loadPreferences(userId);
+    if (prefs) {
+      setReminderEnabled(prefs.reminder_enabled === true);
+      setReminderTime(prefs.reminder_time || "20:00");
+      // Hidden tags: union local + remote, then push the union back up if it grew
+      // (so a tag hidden offline isn't lost, and another device's hides arrive).
+      const localHidden = loadHiddenTagsLocal();
+      const remoteHidden = Array.isArray(prefs.hidden_tags) ? prefs.hidden_tags : [];
+      const mergedHidden = [...new Set([...localHidden, ...remoteHidden])];
+      setHiddenTags(mergedHidden);
+      saveHiddenTagsLocal(mergedHidden);
+      if (mergedHidden.length !== remoteHidden.length) {
+        await savePreferences(userId, { hidden_tags: mergedHidden });
+      }
+    }
+    await syncCustomTags(userId);
+  };
+
+  // ── Custom-tag + hidden-tag handlers ──
+  const persistHiddenTags = (arr) => {
+    if (!currentUser?.id) return;
+    savePreferences(currentUser.id, { hidden_tags: arr }).then(ok => {
+      if (!ok) showToast("Couldn't save — it'll sync to your account later");
+    });
+  };
+
+  // Returns the canonical tag name to select. Dedupes against supplied + custom
+  // (case-insensitive) and un-hides a supplied tag rather than making a duplicate.
+  const addCustomTag = (rawName) => {
+    const name = rawName.trim();
+    if (!name) return null;
+    const lower = name.toLowerCase();
+    const suppliedMatch = TAGS.find(t => t.toLowerCase() === lower);
+    if (suppliedMatch) {
+      if (hiddenTags.includes(suppliedMatch)) {
+        const next = hiddenTags.filter(t => t !== suppliedMatch);
+        setHiddenTags(next); saveHiddenTagsLocal(next); persistHiddenTags(next);
+      }
+      return suppliedMatch;
+    }
+    const existing = customTags.find(c => c.name.toLowerCase() === lower);
+    if (existing) return existing.name;
+    const t = { id: crypto.randomUUID(), name, created_at: new Date().toISOString() };
+    const next = [...customTags, t];
+    setCustomTags(next); saveCustomTagsLocal(next);
+    if (currentUser?.id) {
+      saveCustomTagRemote(currentUser.id, t).then(ok => {
+        if (!ok) showToast("Tag saved on this device — it'll sync later");
+      });
+    }
+    return t.name;
+  };
+
+  const deleteCustomTag = (id, name) => {
+    if (!window.confirm(`Delete the tag “${name}”? Moments already tagged keep their label.`)) return;
+    const next = customTags.filter(c => c.id !== id);
+    setCustomTags(next); saveCustomTagsLocal(next);
+    if (currentUser?.id) {
+      deleteCustomTagRemote(currentUser.id, id).then(ok => {
+        if (!ok) showToast("Couldn't remove from your account — please try again");
+      });
+    }
+  };
+
+  const hideSuppliedTag = (name) => {
+    if (hiddenTags.includes(name)) return;
+    if (!window.confirm(`Hide “${name}” from your tag list? Moments already tagged keep it.`)) return;
+    const next = [...hiddenTags, name];
+    setHiddenTags(next); saveHiddenTagsLocal(next); persistHiddenTags(next);
+  };
+
   // ── Auth handlers ──
   const handleSignIn = async () => {
     if (!authEmail) return;
@@ -855,11 +1059,7 @@ export default function App() {
       setAuthScreen("app");
       setAuthChecked(true);
       await savePreferences(data.user.id, { email: data.user.email });
-      const prefs = await loadPreferences(data.user.id);
-      if (prefs) {
-        setReminderEnabled(prefs.reminder_enabled === true);
-        setReminderTime(prefs.reminder_time || "20:00");
-      }
+      await hydrateUserData(data.user.id);
       await syncMoments(data.user.id);
     } else {
       setAuthError("Invalid code. Please try again.");
@@ -1003,7 +1203,16 @@ export default function App() {
     (!filterMood || m.mood === filterMood) && (!filterTag || m.tag === filterTag)
   ), [moments, filterMood, filterTag]);
 
-  const usedTags = useMemo(() => TAGS.filter(t => moments.some(m => m.tag === t)), [moments]);
+  // Supplied tags this user hasn't hidden — the selectable supplied set.
+  const visibleSupplied = useMemo(() => TAGS.filter(t => !hiddenTags.includes(t)), [hiddenTags]);
+
+  // Browse filters from the tags actually PRESENT on moments — so custom tags and
+  // any now-hidden/deleted tag still filter the history that used them (no orphans).
+  const usedTags = useMemo(() => {
+    const seen = [];
+    moments.forEach(m => { if (m.tag && !seen.includes(m.tag)) seen.push(m.tag); });
+    return seen;
+  }, [moments]);
 
   // ════════════════════════════════════════════════════════════════════════
   //  Shared style block
@@ -1021,6 +1230,17 @@ export default function App() {
       .mj-btn:disabled{background:#D8BCA6;cursor:not-allowed}
       .mj-chip{border:1px solid ${C.border};background:#fff;color:${C.muted};border-radius:999px;padding:7px 14px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:all .12s}
       .mj-chip.on{background:${C.accent};border-color:${C.accent};color:#fff}
+      /* ── Tag chips (supplied + custom, identical look) with subtle × ── */
+      .mj-tagchip{display:inline-flex;align-items:center;border:1px solid ${C.border};background:#fff;color:${C.muted};border-radius:999px;font-family:inherit;font-size:13px;font-weight:600;overflow:hidden;transition:all .12s}
+      .mj-tagchip.on{background:${C.accent};border-color:${C.accent};color:#fff}
+      .mj-tagchip-label{background:none;border:none;color:inherit;font:inherit;cursor:pointer;padding:7px 5px 7px 14px;line-height:1}
+      .mj-tagchip-x{background:none;border:none;color:inherit;cursor:pointer;font-size:16px;line-height:1;padding:7px 11px 7px 3px;opacity:.4;transition:opacity .12s}
+      .mj-tagchip-x:hover{opacity:.85}
+      .mj-tagchip.on .mj-tagchip-x{opacity:.7}
+      .mj-tagchip-add{padding:7px 14px;color:${C.accent};border-style:dashed;cursor:pointer}
+      .mj-tagchip-add:hover{background:${C.cream}}
+      .mj-tag-input{border:none;outline:none;background:transparent;color:#fff;font:inherit;font-size:13px;font-weight:600;width:96px;padding:7px 12px 7px 10px}
+      .mj-tag-input::placeholder{color:rgba(255,255,255,.7)}
       .mj-mood{border:1px solid ${C.border};background:#fff;border-radius:14px;width:54px;height:54px;font-size:26px;cursor:pointer;transition:all .12s;display:flex;align-items:center;justify-content:center}
       .mj-mood.on{border-color:${C.accent};background:${C.cream};transform:scale(1.06)}
       @keyframes mjbounce{0%,80%,100%{transform:scale(0.6);opacity:.4}40%{transform:scale(1);opacity:1}}
@@ -1405,12 +1625,11 @@ export default function App() {
             <div style={{ fontSize: 13, fontWeight: 600, color: C.muted, margin: "18px 0 10px" }}>
               Tag it <span style={{ fontWeight: 400 }}>(optional)</span>
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {TAGS.map(t => (
-                <button key={t} className={`mj-chip ${draftTag === t ? "on" : ""}`}
-                  onClick={() => setDraftTag(draftTag === t ? null : t)}>{t}</button>
-              ))}
-            </div>
+            <TagPicker
+              selected={draftTag} onSelect={setDraftTag}
+              supplied={visibleSupplied} custom={customTags}
+              onAddCustom={addCustomTag} onDeleteCustom={deleteCustomTag} onHideSupplied={hideSuppliedTag}
+            />
 
             <button className="mj-btn" style={{ marginTop: 22 }} disabled={!draftText.trim() || dropping}
               onClick={dropInJar}>
@@ -1461,12 +1680,11 @@ export default function App() {
             <div style={{ fontSize: 13, fontWeight: 600, color: C.muted, margin: "18px 0 10px" }}>
               Tag it <span style={{ fontWeight: 400 }}>(optional)</span>
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {TAGS.map(t => (
-                <button key={t} className={`mj-chip ${editTag === t ? "on" : ""}`}
-                  onClick={() => setEditTag(editTag === t ? null : t)}>{t}</button>
-              ))}
-            </div>
+            <TagPicker
+              selected={editTag} onSelect={setEditTag}
+              supplied={visibleSupplied} custom={customTags}
+              onAddCustom={addCustomTag} onDeleteCustom={deleteCustomTag} onHideSupplied={hideSuppliedTag}
+            />
 
             <button className="mj-btn" style={{ marginTop: 22 }} disabled={!editText.trim() || savingEdit}
               onClick={saveEdit}>

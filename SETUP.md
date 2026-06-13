@@ -89,6 +89,38 @@ grant select, insert, update, delete on public.moments     to anon, authenticate
 grant select, insert, update, delete on public.preferences to anon, authenticated;
 ```
 
+### Custom tags + hidden supplied tags
+
+Users can add their own tags and hide/delete any tag (custom **or** supplied).
+Run **`supabase/custom-tags.sql`** in the SQL Editor (idempotent — safe to re-run).
+It creates the `custom_tags` table (same RLS pattern as `moments`) and adds a
+`hidden_tags text[]` column to `preferences`:
+
+```sql
+-- Per-user custom tags
+create table if not exists public.custom_tags (
+  id          uuid primary key,
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  name        text not null,
+  created_at  timestamptz not null default now()
+);
+create index if not exists custom_tags_user_id_idx on public.custom_tags (user_id);
+create unique index if not exists custom_tags_user_name_uniq
+  on public.custom_tags (user_id, lower(name));
+
+alter table public.custom_tags enable row level security;
+create policy "own custom tags" on public.custom_tags
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+grant select, insert, update, delete on public.custom_tags to anon, authenticated;
+
+-- Per-user hidden supplied-tag names (cosmetic, per-user; never touches moments)
+alter table public.preferences
+  add column if not exists hidden_tags text[] not null default '{}';
+```
+
+A moment stores the tag **string** (never a foreign key), so hiding or deleting a
+tag only removes it as a *new* selectable option — past moments keep their label.
+
 ---
 
 ## 3. Auth configuration (must match LifeOnTrack's working setup)
