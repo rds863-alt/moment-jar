@@ -33,12 +33,22 @@ const SUPABASE_URL = "https://afhcuanapgsxrorvygfi.supabase.co";
 const SUPABASE_KEY = "sb_publishable_82U-uQThAEPZJaHY9_f1KA_eOFYc24V";
 
 // ── Moods & tags ──────────────────────────────────────────────────────────────
+// Curated, warm emotional range. Existing emoji are kept exactly — saved
+// moments store the emoji string itself, so changing one would orphan moments
+// already using it. New moods are only appended.
 const MOODS = [
   { emoji: "😊", label: "Happy" },
   { emoji: "😂", label: "Funny" },
   { emoji: "😌", label: "Peaceful" },
   { emoji: "🥰", label: "Loved" },
   { emoji: "✨", label: "Special" },
+  { emoji: "🙏", label: "Grateful" },
+  { emoji: "😍", label: "Excited" },
+  { emoji: "🥹", label: "Proud" },
+  { emoji: "🫶", label: "Content" },
+  { emoji: "🌙", label: "Nostalgic" },
+  { emoji: "🌅", label: "Hopeful" },
+  { emoji: "🪞", label: "Reflective" },
 ];
 const TAGS = ["family", "nature", "work", "food", "friends", "simple joy"];
 
@@ -1385,7 +1395,7 @@ export default function App() {
             </div>
 
             <div style={{ fontSize: 13, fontWeight: 600, color: C.muted, margin: "14px 0 10px" }}>How did it feel?</div>
-            <div style={{ display: "flex", gap: 10, justifyContent: "space-between" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" }}>
               {MOODS.map(m => (
                 <button key={m.emoji} className={`mj-mood ${draftMood === m.emoji ? "on" : ""}`}
                   title={m.label} onClick={() => setDraftMood(draftMood === m.emoji ? null : m.emoji)}>
@@ -1441,7 +1451,7 @@ export default function App() {
             </div>
 
             <div style={{ fontSize: 13, fontWeight: 600, color: C.muted, margin: "14px 0 10px" }}>How did it feel?</div>
-            <div style={{ display: "flex", gap: 10, justifyContent: "space-between" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" }}>
               {MOODS.map(mo => (
                 <button key={mo.emoji} className={`mj-mood ${editMood === mo.emoji ? "on" : ""}`}
                   title={mo.label} onClick={() => setEditMood(editMood === mo.emoji ? null : mo.emoji)}>
