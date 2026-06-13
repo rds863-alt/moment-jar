@@ -46,9 +46,8 @@ const MOODS = [
   { emoji: "😍", label: "Excited" },
   { emoji: "🥹", label: "Proud" },
   { emoji: "🫶", label: "Content" },
-  { emoji: "🌙", label: "Nostalgic" },
-  { emoji: "🌅", label: "Hopeful" },
-  { emoji: "🪞", label: "Reflective" },
+  { emoji: "🥲", label: "Nostalgic" },
+  { emoji: "😇", label: "Hopeful" },
 ];
 const TAGS = ["family", "nature", "work", "food", "friends", "simple joy"];
 
