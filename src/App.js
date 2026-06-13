@@ -837,6 +837,7 @@ export default function App() {
   // Browse filters
   const [filterMood, setFilterMood] = useState(null);
   const [filterTag, setFilterTag] = useState(null);
+  const [filterMonth, setFilterMonth] = useState(null); // "YYYY-MM" or null (all)
 
   // Daily reminder preferences (synced to the preferences table)
   const [reminderEnabled, setReminderEnabled] = useState(false);
@@ -1200,8 +1201,34 @@ export default function App() {
   const randomPastMoment = randomPast ? (moments.find(m => m.id === randomPast.id) || null) : null;
 
   const filtered = useMemo(() => moments.filter(m =>
-    (!filterMood || m.mood === filterMood) && (!filterTag || m.tag === filterTag)
-  ), [moments, filterMood, filterTag]);
+    (!filterMood || m.mood === filterMood) &&
+    (!filterTag || m.tag === filterTag) &&
+    (!filterMonth || String(m.date || "").slice(0, 7) === filterMonth)
+  ), [moments, filterMood, filterTag, filterMonth]);
+
+  // Months that actually contain moments, newest first — for the Browse "jump to
+  // month" dropdown. Key is the YYYY-MM prefix of the moment's local date.
+  const availableMonths = useMemo(() => {
+    const seen = [];
+    const keys = new Set();
+    moments.forEach(m => {
+      const key = String(m.date || "").slice(0, 7); // "YYYY-MM"
+      if (key.length === 7 && !keys.has(key)) { keys.add(key); seen.push(key); }
+    });
+    seen.sort((a, b) => b.localeCompare(a)); // newest first
+    const months = ["January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"];
+    return seen.map(key => {
+      const [y, mo] = key.split("-").map(Number);
+      return { key, label: `${months[mo - 1]} ${y}` };
+    });
+  }, [moments]);
+
+  // If the selected month no longer has any moments (e.g. they were deleted),
+  // fall back to showing everything so the user isn't stuck on an empty filter.
+  useEffect(() => {
+    if (filterMonth && !availableMonths.some(m => m.key === filterMonth)) setFilterMonth(null);
+  }, [filterMonth, availableMonths]);
 
   // Supplied tags this user hasn't hidden — the selectable supplied set.
   const visibleSupplied = useMemo(() => TAGS.filter(t => !hiddenTags.includes(t)), [hiddenTags]);
@@ -1239,6 +1266,10 @@ export default function App() {
       .mj-tagchip.on .mj-tagchip-x{opacity:.7}
       .mj-tagchip-add{padding:7px 14px;color:${C.accent};border-style:dashed;cursor:pointer}
       .mj-tagchip-add:hover{background:${C.cream}}
+      /* ── Month dropdown (Browse) — calm, pill-shaped native select ── */
+      .mj-select{appearance:none;-webkit-appearance:none;background-color:#fff;border:1px solid ${C.border};border-radius:999px;padding:8px 32px 8px 15px;color:${C.text};font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;outline:none;transition:border .15s,box-shadow .15s;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238A7866' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+      .mj-select:focus{border-color:${C.accent};box-shadow:0 0 0 3px rgba(200,75,17,.12)}
+      .mj-select.on{border-color:${C.accent};color:${C.accentD};background-color:${C.cream}}
       .mj-tag-input{border:none;outline:none;background:transparent;color:#fff;font:inherit;font-size:13px;font-weight:600;width:96px;padding:7px 12px 7px 10px}
       .mj-tag-input::placeholder{color:rgba(255,255,255,.7)}
       .mj-mood{border:1px solid ${C.border};background:#fff;border-radius:14px;width:54px;height:54px;font-size:26px;cursor:pointer;transition:all .12s;display:flex;align-items:center;justify-content:center}
@@ -1513,8 +1544,21 @@ export default function App() {
         {/* ── BROWSE ───────────────────────────────────────────────── */}
         {tab === "browse" && (
           <div style={{ animation: "mjfade .4s ease", marginTop: 8 }}>
-            <div style={{ fontFamily: "'Instrument Serif',serif", fontSize: 22, color: C.dark, marginBottom: 14 }}>
-              All moments
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+              gap: 12, marginBottom: 14 }}>
+              <div style={{ fontFamily: "'Instrument Serif',serif", fontSize: 22, color: C.dark }}>
+                {filterMonth
+                  ? (availableMonths.find(m => m.key === filterMonth)?.label || "Moments")
+                  : "All moments"}
+              </div>
+              {/* Jump to a specific month — only when there's more than one to choose */}
+              {availableMonths.length > 1 && (
+                <select className={`mj-select ${filterMonth ? "on" : ""}`} value={filterMonth || ""}
+                  aria-label="Jump to month" onChange={e => setFilterMonth(e.target.value || null)}>
+                  <option value="">All moments</option>
+                  {availableMonths.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+                </select>
+              )}
             </div>
 
             {/* Filters */}
