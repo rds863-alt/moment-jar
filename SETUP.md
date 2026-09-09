@@ -139,7 +139,9 @@ tag only removes it as a *new* selectable option — past moments keep their lab
 ### Weekly recap switch (migration 0003)
 
 Settings has two independent email switches: **Daily reminder** (`reminder_enabled`,
-default off) and **Weekly recap on Sundays** (`weekly_recap_enabled`, default **on**).
+default off) and **Weekly recap on Sundays** (`weekly_recap_enabled`, default **on** for
+new accounts; existing accounts are backfilled to match their daily-reminder choice, so
+nobody who never opted into email starts receiving recaps).
 The `weekly-recap` function emails every user whose `weekly_recap_enabled` is true and
 who added at least one moment in the last seven days — it no longer looks at
 `reminder_enabled` at all.
@@ -147,6 +149,7 @@ who added at least one moment in the last seven days — it no longer looks at
 ```sql
 alter table public.preferences
   add column if not exists weekly_recap_enabled boolean not null default true;
+update public.preferences set weekly_recap_enabled = reminder_enabled;  -- one-time backfill
 ```
 
 The client tolerates the column being absent (it retries the preferences read without
@@ -205,7 +208,7 @@ Two Supabase Edge Functions send the warm emails. Both live in
 sender identity and the time-zone helpers:
 
 - From: `Moment Jar <reminders@momentjar.app>`
-- Reply-to: `hello@momentjar.app`
+- Reply-to: `support@harelin.com` (also the contact address on `/privacy`)
 
 **The `momentjar.app` domain must be verified in Resend (Domains → Add) before deploying
 these functions**, otherwise every send returns an error. Until 2026-09-08 the functions

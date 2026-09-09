@@ -29,7 +29,7 @@ Voice everywhere: warm, gentle, never streak-shaming ("miss a day and nothing ha
 | Client keys | URL + publishable key are literals in `src/lib/supabase.js`. No `.env`, no `REACT_APP_*`. Only the publishable (anon) key is ever in the client. |
 | Auth | Supabase email OTP, **6-digit** codes, via raw `fetch` (no `@supabase/supabase-js` in the client — it crashed mobile browsers). Session lives in localStorage: `sb_token`, `sb_refresh`, `sb_user`. Tokens auto-refresh on 401/403. |
 | Auth email (SMTP) | Configured in the Supabase dashboard, not the repo: Resend SMTP, `smtp.resend.com:465`, user `resend`, sender `hello@momentjar.app`. Known quirk: a first-time user may get a "confirm your email" link first; requesting the code again sends the digits. |
-| Function email (API) | Edge functions call the Resend HTTP API with secret `RESEND_API_KEY`. Sender identity lives in `supabase/functions/_shared/email.ts`: **From `Moment Jar <reminders@momentjar.app>`, reply-to `hello@momentjar.app`** (changed Sept 8 from `reminders@lifeontrack.app` / `rds86@duck.com`). **momentjar.app must be verified in Resend before the functions are redeployed.** |
+| Function email (API) | Edge functions call the Resend HTTP API with secret `RESEND_API_KEY`. Sender identity lives in `supabase/functions/_shared/email.ts`: **From `Moment Jar <reminders@momentjar.app>`, reply-to `support@harelin.com`** (changed Sept 8 from `reminders@lifeontrack.app` / `rds86@duck.com`; `support@harelin.com` is also the contact and deletion address on `/privacy`). **momentjar.app must be verified in Resend before the functions are redeployed.** |
 | Cron | `pg_cron` + `pg_net` in Supabase: `moment-jar-daily-reminders` every 30 min, `moment-jar-weekly-recap` hourly (function guards for Sunday 7pm Pacific). SQL in SETUP.md §6. |
 | Analytics | None. GA4 snippet is commented out in `public/index.html`. |
 | Android | Not built. Plan (SETUP.md §7): mirror LifeOnTrackApp2 (Expo SDK 54 WebView). |
@@ -108,14 +108,14 @@ Deploy: `supabase functions deploy daily-reminders --project-ref afhcuanapgsxror
 ## NEXT STEPS (in order)
 
 1. **Verify momentjar.app in Resend** (Resend → Domains → Add → add the DNS records at the registrar). Until this is done the redeployed functions will fail to send. If it can't be done soon, revert the two constants in `_shared/email.ts` to the lifeontrack.app values before deploying.
-2. **Run migration 0003** in the Supabase SQL Editor (one `alter table … add column if not exists`). Running 0001 and 0002 too is harmless.
+2. **Run migration 0003** in the Supabase SQL Editor, once: the `alter table` plus the one-time `update` backfill. Running 0001 and 0002 too is harmless.
 3. **Deploy both edge functions** (commands above), then `curl -X POST ".../functions/v1/weekly-recap?force=true"` to confirm a send.
 4. **Review, commit, push** — Vercel deploys on push. Suggested commit message: "Foundation pass: split App.js into modules, fix sign-out/timeout/privacy, weekly recap toggle, migrations, momentjar.app sender".
 5. After deploy, open Settings on a signed-in account and flip the weekly toggle to confirm it saves (toast "Weekly recap off").
 
 ## OPEN DECISIONS / BACKLOG
 
-- **Weekly recap default = ON for everyone** with a preferences row (every account that has ever signed in). Active users who never opted into any email will start getting Sunday recaps. Intended per the Sept 8 spec, but Rick should confirm before deploying; the alternative is `default false` in 0003 plus a one-line change.
+- Weekly recap audience: migration 0003 backfills `weekly_recap_enabled = reminder_enabled` for existing rows, so only people who already had the daily reminder on get recaps at first; new accounts default to on. Decided Sept 8. The backfill must run only once (re-running would overwrite later toggle choices).
 - Edit conflicts: an edit whose PATCH fails is kept locally but is not retried (only new moments are re-uploaded by sync).
 - Android wrapper (SETUP.md §7).
 - GA4 measurement ID (commented placeholder in `public/index.html`).

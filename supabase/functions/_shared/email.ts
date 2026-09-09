@@ -5,7 +5,7 @@
 // Sender identity. The momentjar.app domain must be verified in Resend before
 // these addresses will deliver (see SETUP.md § 6).
 export const EMAIL_FROM = "Moment Jar <reminders@momentjar.app>";
-export const EMAIL_REPLY_TO = "hello@momentjar.app";
+export const EMAIL_REPLY_TO = "support@harelin.com";
 
 // Validate an IANA time zone string; fall back to UTC if missing/invalid.
 export function safeTz(tz: string | null): string {
