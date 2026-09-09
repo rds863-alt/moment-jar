@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { EMAIL_FROM, EMAIL_REPLY_TO, safeTz, tzDateStr } from "../_shared/email.ts";
 
 // Same env-var pattern as the daily-reminders function.
 // RESEND_API_KEY must be set as a Supabase secret. SUPABASE_URL and
@@ -26,27 +27,6 @@ const CLOSERS = [
   "Future-you is going to love reading these back.",
   "One moment at a time — you're doing beautifully.",
 ];
-
-// Validate an IANA time zone string; fall back to UTC if missing/invalid.
-function safeTz(tz: string | null): string {
-  if (!tz) return "UTC";
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: tz });
-    return tz;
-  } catch {
-    return "UTC";
-  }
-}
-
-// Today's date (YYYY-MM-DD) in a given time zone — matches how the app stores
-// each moment's `date` (the browser's local calendar day).
-function tzDateStr(tz: string): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
-  }).formatToParts(new Date());
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  return `${get("year")}-${get("month")}-${get("day")}`;
-}
 
 // Current weekday ("Sun"…"Sat") and hour (0–23) in a given time zone.
 function tzWeekdayHour(tz: string): { weekday: string; hour: number } {
@@ -171,14 +151,17 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-    // Same audience as the daily reminder.
+    // Everyone who has the weekly recap switched on (Settings → "Weekly recap
+    // on Sundays"; preferences.weekly_recap_enabled, default true). This is
+    // independent of the daily reminder toggle. Users with no moments this
+    // week are skipped below, so quiet accounts never get an empty recap.
     const { data: prefs } = await supabase
       .from("preferences")
-      .select("user_id, email, reminder_enabled, timezone")
-      .eq("reminder_enabled", true);
+      .select("user_id, email, weekly_recap_enabled, timezone")
+      .eq("weekly_recap_enabled", true);
 
     if (!prefs || prefs.length === 0) {
-      return new Response("No users with reminders enabled", { status: 200 });
+      return new Response("No users with the weekly recap enabled", { status: 200 });
     }
 
     const closer = CLOSERS[Math.floor(Math.random() * CLOSERS.length)];
@@ -229,8 +212,8 @@ serve(async (req) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          from: "Moment Jar <reminders@lifeontrack.app>",
-          reply_to: "rds86@duck.com",
+          from: EMAIL_FROM,
+          reply_to: EMAIL_REPLY_TO,
           to: pref.email,
           subject: "Your week in the jar 🫙",
           html,

@@ -2,8 +2,10 @@
 
 Moment Jar reuses the **exact same stack as LifeOnTrack** (Create React App → Vercel,
 Supabase Postgres + Auth, OTP 6-digit email codes via **raw fetch**, Resend SMTP).
-Read `LifeOnTrack-Project-Handoff.md` for the *why* behind each decision — especially
-the auth history (raw fetch instead of `@supabase/supabase-js`, OTP instead of magic links).
+Read **`MomentJar-Handoff.md`** (repo root) for this project's history and current state, and
+`LifeOnTrack-Project-Handoff.md` (in Downloads / lifeadmin) for the *why* behind the inherited
+decisions — especially the auth history (raw fetch instead of `@supabase/supabase-js`, OTP
+instead of magic links).
 
 This is a **separate Supabase project** from LifeOnTrack — its data must not mix.
 
@@ -26,7 +28,20 @@ This is a **separate Supabase project** from LifeOnTrack — its data must not m
 
 ## 2. Database schema
 
-Run this in the Supabase **SQL Editor**:
+The schema now lives in **`supabase/migrations/`** as three idempotent files (safe to
+re-run on the live project):
+
+| File | What it creates |
+|---|---|
+| `0001_initial.sql` | `moments`, `preferences` (incl. `timezone`, `is_pro`, `is_legacy`), RLS policies, grants, `reminder_email_state` |
+| `0002_custom_tags.sql` | `custom_tags` table + RLS, `preferences.hidden_tags` |
+| `0003_weekly_recap.sql` | `preferences.weekly_recap_enabled boolean not null default true` |
+
+**To apply:** open the Supabase dashboard → SQL Editor → paste each file's contents in
+order (0001, 0002, 0003) → Run. On the live project only 0003 adds anything new; the
+first two will report "already exists" style no-ops, which is expected.
+
+The SQL below is kept as a readable reference of what 0001 contains.
 
 ```sql
 -- One row per moment
@@ -92,7 +107,7 @@ grant select, insert, update, delete on public.preferences to anon, authenticate
 ### Custom tags + hidden supplied tags
 
 Users can add their own tags and hide/delete any tag (custom **or** supplied).
-Run **`supabase/custom-tags.sql`** in the SQL Editor (idempotent — safe to re-run).
+This is migration **`0002_custom_tags.sql`** (the original `supabase/custom-tags.sql` is kept for reference; both are idempotent).
 It creates the `custom_tags` table (same RLS pattern as `moments`) and adds a
 `hidden_tags text[]` column to `preferences`:
 
@@ -120,6 +135,22 @@ alter table public.preferences
 
 A moment stores the tag **string** (never a foreign key), so hiding or deleting a
 tag only removes it as a *new* selectable option — past moments keep their label.
+
+### Weekly recap switch (migration 0003)
+
+Settings has two independent email switches: **Daily reminder** (`reminder_enabled`,
+default off) and **Weekly recap on Sundays** (`weekly_recap_enabled`, default **on**).
+The `weekly-recap` function emails every user whose `weekly_recap_enabled` is true and
+who added at least one moment in the last seven days — it no longer looks at
+`reminder_enabled` at all.
+
+```sql
+alter table public.preferences
+  add column if not exists weekly_recap_enabled boolean not null default true;
+```
+
+The client tolerates the column being absent (it retries the preferences read without
+it), but the two toggles won't save until 0003 has been run.
 
 ---
 
@@ -163,15 +194,23 @@ git push
 - **`vercel.json` must use `rewrites`, never `routes`** — `routes` white-screened the entire
   LifeOnTrack app and cost hours of debugging. Keep the file minimal.
 - Web changes deploy instantly and do **not** trigger Google Play review.
+- `/privacy` is served by the rewrite in `vercel.json` from `public/privacy.html`.
 
 ---
 
 ## 6. Email functions (daily reminder + weekly recap)
 
 Two Supabase Edge Functions send the warm emails. Both live in
-`supabase/functions/`, share the same env-var pattern, and send via Resend from
-`Moment Jar <reminders@lifeontrack.app>` (reply-to `rds86@duck.com`) using the
-already-verified `lifeontrack.app` domain.
+`supabase/functions/` and share `supabase/functions/_shared/email.ts`, which holds the
+sender identity and the time-zone helpers:
+
+- From: `Moment Jar <reminders@momentjar.app>`
+- Reply-to: `hello@momentjar.app`
+
+**The `momentjar.app` domain must be verified in Resend (Domains → Add) before deploying
+these functions**, otherwise every send returns an error. Until 2026-09-08 the functions
+sent from the already-verified `lifeontrack.app` domain; if momentjar.app isn't verified
+yet, that is the one thing to change back in `_shared/email.ts`.
 
 ### One-time setup (per project)
 
@@ -221,6 +260,10 @@ supabase functions deploy weekly-recap   --project-ref afhcuanapgsxrorvygfi --no
 Both are deployed with `--no-verify-jwt` because they're triggered by cron, not
 by a signed-in user.
 
+Both functions import from `../_shared/email.ts`; the Supabase CLI bundles that folder
+automatically, so there is nothing extra to deploy for it. Redeploy **both** functions
+whenever `_shared/email.ts` changes.
+
 ### Cron schedules (run these in the SQL Editor)
 
 ```sql
@@ -240,6 +283,7 @@ select cron.schedule(
 
 -- Weekly recap: fires hourly; an internal guard only sends at Sunday 7pm
 -- America/Los_Angeles (DST-proof — the function resolves PST/PDT itself).
+-- Audience: preferences.weekly_recap_enabled = true (migration 0003).
 select cron.schedule(
   'moment-jar-weekly-recap',
   '0 * * * *',
@@ -256,7 +300,7 @@ select cron.schedule(
 
 ```bash
 # Weekly recap supports ?force=true to bypass the Sunday-7pm guard.
-# Needs a reminder_enabled account with at least one moment in the last 7 days.
+# Needs an account with weekly_recap_enabled (the default) and at least one moment in the last 7 days.
 curl -X POST "https://afhcuanapgsxrorvygfi.supabase.co/functions/v1/weekly-recap?force=true"
 ```
 
@@ -273,11 +317,14 @@ incompatible with the WebView setup.
 
 ---
 
-## What's in v1 (and what's deliberately not)
+## What's shipped (and what's deliberately not)
 
-**In:** add a memory (text + mood + optional tag), the jar that fills as moments
-accumulate, "N moments this year" counter, recent moments, browse with mood/tag filters,
-"one year ago today", OTP auth, Supabase sync + offline localStorage.
+**In:** add a memory (text + mood + optional tag, custom tags), edit/delete, the jar that
+fills as moments accumulate, "N moments this year" counter, recent moments, browse with
+mood/tag/month filters, "one year ago today", random "from your jar", "Open your jar"
+year-in-review playback (10+ moments), printable PDF book for completed years, daily
+reminder + weekly recap emails with separate switches, OTP auth, Supabase sync +
+localStorage copy, privacy page.
 
-**Not in v1** (see handoff): shared jars, photo attachments, year-in-review, PDF export,
-push notifications, printed book, AI features. Ship the emotional hook first.
+**Still not in:** shared jars, photo attachments, push notifications, printed (physical)
+book ordering, AI features, payments (`is_pro` / `is_legacy` columns exist but gate nothing).

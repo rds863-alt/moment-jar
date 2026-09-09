@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap');
+
+/* Palette (mirrors C in src/lib/constants.js):
+   dark #1a0a00 · accent #C84B11 · accentD #A33A0D · gold #FFD200 · bg #FFF8F0
+   card #FFFFFF · cream #FBEEE2 · border #EADBCB · text #3D2A1C · muted #8A7866 */
+
+*{box-sizing:border-box}
+.mj-inp{background:#fff;border:1px solid #EADBCB;border-radius:12px;padding:12px 16px;color:#3D2A1C;font-family:inherit;font-size:15px;width:100%;outline:none;transition:border .15s,box-shadow .15s}
+.mj-inp:focus{border-color:#C84B11;box-shadow:0 0 0 3px rgba(200,75,17,.12)}
+.mj-inp::placeholder{color:#B9A892}
+.mj-btn{background:#C84B11;color:#fff;border:none;border-radius:12px;padding:14px;font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;width:100%;transition:background .15s,transform .08s}
+.mj-btn:hover{background:#A33A0D}
+.mj-btn:active{transform:scale(.985)}
+.mj-btn:disabled{background:#D8BCA6;cursor:not-allowed}
+.mj-chip{border:1px solid #EADBCB;background:#fff;color:#8A7866;border-radius:999px;padding:7px 14px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:all .12s}
+.mj-chip.on{background:#C84B11;border-color:#C84B11;color:#fff}
+/* ── Tag chips (supplied + custom, identical look) with subtle × ── */
+.mj-tagchip{display:inline-flex;align-items:center;border:1px solid #EADBCB;background:#fff;color:#8A7866;border-radius:999px;font-family:inherit;font-size:13px;font-weight:600;overflow:hidden;transition:all .12s}
+.mj-tagchip.on{background:#C84B11;border-color:#C84B11;color:#fff}
+.mj-tagchip-label{background:none;border:none;color:inherit;font:inherit;cursor:pointer;padding:7px 5px 7px 14px;line-height:1}
+.mj-tagchip-x{background:none;border:none;color:inherit;cursor:pointer;font-size:16px;line-height:1;padding:7px 11px 7px 3px;opacity:.4;transition:opacity .12s}
+.mj-tagchip-x:hover{opacity:.85}
+.mj-tagchip.on .mj-tagchip-x{opacity:.7}
+.mj-tagchip-add{padding:7px 14px;color:#C84B11;border-style:dashed;cursor:pointer}
+.mj-tagchip-add:hover{background:#FBEEE2}
+/* ── Month dropdown (Browse) — calm, pill-shaped native select ── */
+.mj-select{appearance:none;-webkit-appearance:none;background-color:#fff;border:1px solid #EADBCB;border-radius:999px;padding:8px 32px 8px 15px;color:#3D2A1C;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;outline:none;transition:border .15s,box-shadow .15s;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238A7866' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+.mj-select:focus{border-color:#C84B11;box-shadow:0 0 0 3px rgba(200,75,17,.12)}
+.mj-select.on{border-color:#C84B11;color:#A33A0D;background-color:#FBEEE2}
+.mj-tag-input{border:none;outline:none;background:transparent;color:#fff;font:inherit;font-size:13px;font-weight:600;width:96px;padding:7px 12px 7px 10px}
+.mj-tag-input::placeholder{color:rgba(255,255,255,.7)}
+.mj-mood{border:1px solid #EADBCB;background:#fff;border-radius:14px;width:54px;height:54px;font-size:26px;cursor:pointer;transition:all .12s;display:flex;align-items:center;justify-content:center}
+.mj-mood.on{border-color:#C84B11;background:#FBEEE2;transform:scale(1.06)}
+@keyframes mjbounce{0%,80%,100%{transform:scale(0.6);opacity:.4}40%{transform:scale(1);opacity:1}}
+@keyframes mjfade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes mjnudge{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(200,75,17,.20)}50%{transform:scale(1.015);box-shadow:0 0 0 7px rgba(200,75,17,0)}}
+/* ── Drop-in-the-jar celebration ── */
+.mj-spark{position:absolute;left:50%;top:54%;font-size:18px;line-height:1;pointer-events:none;
+  filter:drop-shadow(0 0 4px #FFD200);will-change:transform,opacity;
+  animation:mjspark .8s cubic-bezier(.22,1,.36,1) forwards}
+@keyframes mjspark{
+  0%{opacity:0;transform:translate(-50%,-50%) translate(0,0) scale(.3) rotate(0deg)}
+  18%{opacity:1}
+  100%{opacity:0;transform:translate(-50%,-50%) translate(var(--tx),var(--ty)) scale(1.15) rotate(45deg)}}
+.mj-rippling{animation:mjripple .8s cubic-bezier(.22,1,.36,1)}
+@keyframes mjripple{
+  0%{transform:translateY(0) scaleY(1)}
+  22%{transform:translateY(-3px) scaleY(1.05)}
+  50%{transform:translateY(1.5px) scaleY(.975)}
+  76%{transform:translateY(-.6px) scaleY(1.01)}
+  100%{transform:translateY(0) scaleY(1)}}
+.mj-countpop{display:inline-block;animation:mjcount .6s cubic-bezier(.34,1.56,.64,1)}
+@keyframes mjcount{0%{transform:scale(1)}35%{transform:scale(1.32);color:#C84B11}100%{transform:scale(1)}}
+@media (prefers-reduced-motion: reduce){
+  .mj-nudge,.mj-rippling,.mj-countpop,.mj-spark{animation:none!important}
+  .mj-spark{display:none!important}}
+/* ── "Open your jar" year-in-review playback ── */
+@keyframes mjcardin{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){.mj-review-card{animation:none!important}}

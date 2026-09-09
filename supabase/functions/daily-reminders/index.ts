@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { EMAIL_FROM, EMAIL_REPLY_TO, safeTz, tzDateStr } from "../_shared/email.ts";
 
 // Same env-var pattern as LifeOnTrack's daily-reminders function.
 // RESEND_API_KEY must be set as a Supabase secret. SUPABASE_URL and
@@ -69,17 +70,6 @@ function toMinutes(hhmm: string | null): number | null {
   return h * 60 + m;
 }
 
-// Validate an IANA time zone string; fall back to UTC if missing/invalid.
-function safeTz(tz: string | null): string {
-  if (!tz) return "UTC";
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: tz });
-    return tz;
-  } catch {
-    return "UTC";
-  }
-}
-
 // Current minutes-into-the-day in a given time zone (0–1439).
 function tzMinutesNow(tz: string): number {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -92,16 +82,6 @@ function tzMinutesNow(tz: string): number {
   }
   if (h === 24) h = 0; // some ICU builds emit "24" at midnight with hour12:false
   return h * 60 + m;
-}
-
-// Today's date (YYYY-MM-DD) in a given time zone — matches how the app stores
-// each moment's `date` (the browser's local calendar day).
-function tzDateStr(tz: string): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
-  }).formatToParts(new Date());
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
 // The email HTML. Only the opener line varies — the amber styling, jar icon,
@@ -237,8 +217,8 @@ serve(async (_req) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          from: "Moment Jar <reminders@lifeontrack.app>",
-          reply_to: "rds86@duck.com",
+          from: EMAIL_FROM,
+          reply_to: EMAIL_REPLY_TO,
           to: pref.email,
           subject,
           html: renderHtml(opener),
